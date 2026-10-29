@@ -1,0 +1,1 @@
+r42 · removed 2 containers, 1 network, 1 volume and the secrets folder

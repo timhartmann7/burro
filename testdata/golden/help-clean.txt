@@ -1,0 +1,9 @@
+burro clean · remove a run's docker containers, networks, volumes and secrets
+
+Usage: burro clean [id]
+
+Example
+  burro clean r42
+
+Exit codes  0 removed · 2 server problem · 4 unknown run
+            5 the run is still active

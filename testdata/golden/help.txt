@@ -9,6 +9,7 @@ Run tests
   run [pipeline]                sync the code and start a run, returns at once
   wait                          wait for the run, then print a short summary
   status                        how the run is going
+  failures                      what failed and where
   log --step <name>             clean log of one step, --grep to search it
   cancel                        stop the run
 
@@ -17,6 +18,7 @@ Server
   sync                          copy the code to the server without a run
   doctor                        check that the server is ready
   host ls                       list your servers
+  clean                         remove a run's docker leftovers and secrets
 
 Typical loop
   burro run           start

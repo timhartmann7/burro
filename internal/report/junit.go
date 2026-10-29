@@ -15,6 +15,8 @@ import (
 )
 
 const (
+	// maxReport is the largest JUnit report burro parses.
+	maxReport = 64 << 20
 	// maxBody caps the kept text of one failure; message and frame come
 	// from its start.
 	maxBody = 64 << 10
@@ -65,6 +67,11 @@ type Case struct {
 	Name    string
 	Message string
 	Frame   string
+}
+
+// key is what makes two failures the same one.
+func (c *Case) key() string {
+	return c.File + "\x00" + c.Name
 }
 
 // junit is what the reports of one step hold.

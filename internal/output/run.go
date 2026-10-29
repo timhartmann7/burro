@@ -2,6 +2,8 @@ package output
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +21,17 @@ const (
 	StateSkip     = "skip"
 	StateNotRun   = "not run"
 )
+
+// Kinds of a failure: absent from the last finished run of the same
+// pipeline, or failing there too.
+const (
+	KindNew  = "NEW"
+	KindSeen = "SEEN"
+)
+
+// Unreadable is the line a step shows when its JUnit report can't be
+// parsed.
+const Unreadable = "report unreadable"
 
 // Started is a run the runner just took over.
 type Started struct {
@@ -55,22 +68,72 @@ type Summary struct {
 	Reason   string        `json:"reason,omitempty"`
 	Local    string        `json:"local_tree,omitempty"`
 	Steps    []SummaryStep `json:"steps"`
+	Failures []Failure     `json:"failures"`
+	// Hidden counts the failures left out: those the server didn't send and
+	// those past --max-lines.
+	Hidden int `json:"hidden"`
+	// More is the command that shows more of the first failure.
+	More string `json:"more,omitempty"`
+	// limit is the --max-lines the summary was cut to.
+	limit int
 }
 
-// SummaryStep is one step of a summary. A failed step carries the tail of
-// its clean log and the command that shows more.
+// SummaryStep is one step of a summary. A failed step without failures
+// from a report carries the tail of its clean log and the command that
+// shows more.
 type SummaryStep struct {
-	Name    string   `json:"name"`
-	State   string   `json:"state"`
-	Seconds int      `json:"seconds"`
-	Detail  string   `json:"detail,omitempty"`
-	Tail    []string `json:"tail,omitempty"`
-	More    string   `json:"more,omitempty"`
+	Name       string   `json:"name"`
+	State      string   `json:"state"`
+	Seconds    int      `json:"seconds"`
+	Tests      *Tests   `json:"tests,omitempty"`
+	Detail     string   `json:"detail,omitempty"`
+	Unreadable bool     `json:"report_unreadable,omitempty"`
+	Tail       []string `json:"tail,omitempty"`
+	More       string   `json:"more,omitempty"`
 }
+
+// Tests counts the tests in a step's JUnit reports.
+type Tests struct {
+	Total   int `json:"total"`
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
+}
+
+// Failure is one failed test, merged over the runs of it that fail the same
+// way, such as one test in three Playwright projects.
+type Failure struct {
+	Step    string `json:"step"`
+	Kind    string `json:"kind"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Name    string `json:"name"`
+	Count   int    `json:"count"`
+	Message string `json:"message"`
+	Frame   string `json:"frame"`
+}
+
+// lines is how many lines the failure takes in a summary.
+func (f *Failure) lines() int {
+	n := 1
+	if f.Message != "" {
+		n++
+	}
+	if f.Frame != "" {
+		n++
+	}
+	return n
+}
+
+// moreFactor is how much more --max-lines the cut line asks for.
+const moreFactor = 10
 
 // Summary prints the run line, the local tree line when the trees differ,
-// one line per step and the log tail of each failed step.
-func (p *Printer) Summary(s *Summary) error {
+// one line per step and under each failed step its failures or log tail.
+// With maxLines above 0 everything fits in that many lines; the last line
+// then says how many failures stayed out and which command shows them.
+func (p *Printer) Summary(s *Summary, maxLines int) error {
+	s = s.fit(maxLines)
 	if p.json {
 		return p.writeJSON(s)
 	}
@@ -84,26 +147,178 @@ func (p *Printer) Summary(s *Summary) error {
 		nameWidth = max(nameWidth, len(st.Name))
 		stateWidth = max(stateWidth, len(st.State))
 	}
-	for _, st := range s.Steps {
-		// Padding goes outside the color codes, so columns line up in both
-		// modes.
-		state := p.state(st.State) + strings.Repeat(" ", stateWidth-len(st.State))
-		cols := []string{fmt.Sprintf("%-*s", nameWidth, st.Name), state}
-		if st.State == StateOK || st.State == StateFail || st.State == StateRunning {
-			cols = append(cols, Duration(time.Duration(st.Seconds)*time.Second))
-		}
-		if st.Detail != "" {
-			cols = append(cols, st.Detail)
-		}
-		b.WriteString(strings.TrimRight(strings.Join(cols, "  "), " ") + "\n")
-		for _, line := range st.Tail {
-			b.WriteString("  " + line + "\n")
-		}
-		if st.More != "" {
-			b.WriteString("more: " + st.More + "\n")
-		}
+	for i := range s.Steps {
+		b.WriteString(p.stepLine(&s.Steps[i], nameWidth, stateWidth) + "\n")
+		p.block(&b, s, &s.Steps[i])
+	}
+	if s.More != "" {
+		b.WriteString("more: " + s.More + "\n")
+	}
+	if s.Hidden > 0 && s.limit > 0 {
+		fmt.Fprintf(&b, "+%d more: burro failures %s --max-lines %d\n", s.Hidden, s.Run, moreFactor*s.limit)
 	}
 	return p.write(b.String())
+}
+
+// block prints what goes under a step: its failures, or the unreadable
+// line, the log tail and the more line.
+func (p *Printer) block(b *strings.Builder, s *Summary, st *SummaryStep) {
+	for i := range s.Failures {
+		if s.Failures[i].Step == st.Name {
+			p.failure(b, &s.Failures[i])
+		}
+	}
+	if st.Unreadable {
+		b.WriteString("  " + Unreadable + "\n")
+	}
+	for _, line := range st.Tail {
+		b.WriteString("  " + line + "\n")
+	}
+	if st.More != "" {
+		b.WriteString("more: " + st.More + "\n")
+	}
+}
+
+// stepLine is name, state, test counts, duration and detail of one step.
+// Padding goes outside the color codes, so columns line up in both modes.
+func (p *Printer) stepLine(st *SummaryStep, nameWidth, stateWidth int) string {
+	state := p.state(st.State) + strings.Repeat(" ", stateWidth-len(st.State))
+	cols := []string{fmt.Sprintf("%-*s", nameWidth, st.Name), state}
+	if st.Tests != nil {
+		cols = append(cols, fmt.Sprintf("%d/%d", st.Tests.Passed, st.Tests.Total))
+	}
+	if st.State == StateOK || st.State == StateFail || st.State == StateRunning {
+		cols = append(cols, Duration(time.Duration(st.Seconds)*time.Second))
+	}
+	if st.Detail != "" {
+		cols = append(cols, st.Detail)
+	}
+	return strings.TrimRight(strings.Join(cols, "  "), " ")
+}
+
+// failure prints one failure: kind, place, name and count, then the first
+// message line and the frame under the place.
+func (p *Printer) failure(b *strings.Builder, f *Failure) {
+	kind := p.palette.Fail(f.Kind)
+	if f.Kind == KindSeen {
+		kind = p.palette.Skip(f.Kind)
+	}
+	kind += strings.Repeat(" ", len(KindSeen)-len(f.Kind))
+	place := f.File
+	if f.Line > 0 {
+		place += ":" + strconv.Itoa(f.Line)
+	}
+	line := "  " + kind + "  " + place + "  " + f.Name
+	if f.Count > 1 {
+		line += "  x" + strconv.Itoa(f.Count)
+	}
+	b.WriteString(line + "\n")
+	const indent = "        "
+	if f.Message != "" {
+		b.WriteString(indent + f.Message + "\n")
+	}
+	if f.Frame != "" {
+		b.WriteString(indent + "at " + f.Frame + "\n")
+	}
+}
+
+// fit returns s cut to maxLines lines. The run line, the step lines and the
+// more lines always stay; failures and log tails fill the rest in order.
+// Once one doesn't fit, the ones after it stay out too, so what shows is
+// never out of order. A log tail that doesn't fit loses its first lines.
+func (s *Summary) fit(maxLines int) *Summary {
+	if maxLines <= 0 {
+		if s.Failures != nil {
+			return s
+		}
+		out := *s
+		out.Failures = []Failure{}
+		return &out
+	}
+	fixed := 1 + len(s.Steps)
+	if s.Local != "" {
+		fixed++
+	}
+	if s.More != "" {
+		fixed++
+	}
+	cut := s.cut(maxLines - fixed)
+	if cut.Hidden > s.Hidden {
+		// The line that says so takes a line too.
+		cut = s.cut(maxLines - fixed - 1)
+	}
+	cut.limit = maxLines
+	return cut
+}
+
+func (s *Summary) cut(room int) *Summary {
+	out := *s
+	out.Steps = slices.Clone(s.Steps)
+	out.Failures = []Failure{}
+	full := false
+	for i := range out.Steps {
+		st := &out.Steps[i]
+		room, full = out.fitFailures(s.Failures, st.Name, room, full)
+		if len(st.Tail) == 0 && !st.Unreadable {
+			continue
+		}
+		used, shown, trimmed := st.fitTail(room, full)
+		if !shown {
+			out.Hidden++
+		}
+		full = full || !shown || trimmed
+		room -= used
+	}
+	return &out
+}
+
+// fitFailures adds the failures of step that fit in room lines and counts
+// the others as hidden. It returns the room left and whether one didn't
+// fit.
+func (s *Summary) fitFailures(all []Failure, step string, room int, full bool) (int, bool) {
+	for _, f := range all {
+		if f.Step != step {
+			continue
+		}
+		if full || f.lines() > room {
+			full = true
+			s.Hidden++
+			continue
+		}
+		s.Failures = append(s.Failures, f)
+		room -= f.lines()
+	}
+	return room, full
+}
+
+// lines is how many lines the block under a step without failures takes:
+// the unreadable line, the tail and the more line.
+func (st *SummaryStep) lines() int {
+	n := len(st.Tail)
+	if st.Unreadable {
+		n++
+	}
+	if st.More != "" {
+		n++
+	}
+	return n
+}
+
+// fitTail cuts the block under a step to room lines, keeping the end of the
+// tail, and returns the lines it uses and whether it shows and was cut. A
+// block that can't keep one tail line, or comes after one that didn't fit,
+// goes whole.
+func (st *SummaryStep) fitTail(room int, full bool) (used int, shown, trimmed bool) {
+	head := st.lines() - len(st.Tail)
+	if full || head+min(1, len(st.Tail)) > room {
+		st.Tail, st.More, st.Unreadable = nil, "", false
+		return 0, false, false
+	}
+	if keep := room - head; keep < len(st.Tail) {
+		st.Tail = st.Tail[len(st.Tail)-keep:]
+		trimmed = true
+	}
+	return st.lines(), true, trimmed
 }
 
 // Headline is the first line of run, wait, status and cancel:
@@ -130,6 +345,44 @@ func (p *Printer) state(s string) string {
 	default:
 		return s
 	}
+}
+
+// Cleaned is what clean removed for one run.
+type Cleaned struct {
+	Run        string `json:"run"`
+	Containers int    `json:"containers"`
+	Networks   int    `json:"networks"`
+	Volumes    int    `json:"volumes"`
+	Secrets    bool   `json:"secrets"`
+}
+
+// Cleaned prints one line: the run and what was removed.
+func (p *Printer) Cleaned(c *Cleaned) error {
+	if p.json {
+		return p.writeJSON(c)
+	}
+	var parts []string
+	for _, n := range []struct {
+		count int
+		what  string
+	}{{c.Containers, "container"}, {c.Networks, "network"}, {c.Volumes, "volume"}} {
+		if n.count == 1 {
+			parts = append(parts, "1 "+n.what)
+		} else if n.count > 1 {
+			parts = append(parts, fmt.Sprintf("%d %ss", n.count, n.what))
+		}
+	}
+	if c.Secrets {
+		parts = append(parts, "the secrets folder")
+	}
+	if len(parts) == 0 {
+		return p.write(c.Run + " · nothing to remove\n")
+	}
+	list := strings.Join(parts, ", ")
+	if len(parts) > 1 {
+		list = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+	return p.write(c.Run + " · removed " + list + "\n")
 }
 
 // Log is the clean log of one step, or the matches of --grep in it.

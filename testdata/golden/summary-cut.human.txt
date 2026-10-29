@@ -1,0 +1,40 @@
+r42 default · tree 5530df9 · 5m · exit 1
+test  [31mFAIL[0m  0/300  4m50s
+  [31mNEW[0m   pkg/a_test.go  TestCase000
+        got 1, want 2
+        at pkg/a_test.go:10
+  [31mNEW[0m   pkg/a_test.go  TestCase001
+        got 1, want 2
+        at pkg/a_test.go:11
+  [31mNEW[0m   pkg/a_test.go  TestCase002
+        got 1, want 2
+        at pkg/a_test.go:12
+  [31mNEW[0m   pkg/a_test.go  TestCase003
+        got 1, want 2
+        at pkg/a_test.go:13
+  [31mNEW[0m   pkg/a_test.go  TestCase004
+        got 1, want 2
+        at pkg/a_test.go:14
+  [31mNEW[0m   pkg/a_test.go  TestCase005
+        got 1, want 2
+        at pkg/a_test.go:15
+  [31mNEW[0m   pkg/a_test.go  TestCase006
+        got 1, want 2
+        at pkg/a_test.go:16
+  [31mNEW[0m   pkg/a_test.go  TestCase007
+        got 1, want 2
+        at pkg/a_test.go:17
+  [31mNEW[0m   pkg/a_test.go  TestCase008
+        got 1, want 2
+        at pkg/a_test.go:18
+  [31mNEW[0m   pkg/a_test.go  TestCase009
+        got 1, want 2
+        at pkg/a_test.go:19
+  [31mNEW[0m   pkg/a_test.go  TestCase010
+        got 1, want 2
+        at pkg/a_test.go:20
+  [31mNEW[0m   pkg/a_test.go  TestCase011
+        got 1, want 2
+        at pkg/a_test.go:21
+more: burro log r42 --step test --grep case
++288 more: burro failures r42 --max-lines 400

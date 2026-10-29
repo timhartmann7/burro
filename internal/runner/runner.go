@@ -37,6 +37,11 @@ const (
 	// poll is how often a stopping step is checked for leftover processes.
 	poll        = 100 * time.Millisecond
 	cacheFolder = ".burro/cache"
+	// drain bounds how long a finished step's output may still arrive: a
+	// process the step left running may hold its output open for good.
+	drain = 2 * time.Second
+	// cleanTimeout bounds the docker cleanup at the end of a run.
+	cleanTimeout = 2 * time.Minute
 )
 
 // burroVar matches $BURRO_X and ${BURRO_X} in step variables.
@@ -95,6 +100,8 @@ type execution struct {
 	r    *Runner
 	req  request
 	proj *report.Project
+	// secrets are the values the step logs mask.
+	secrets [][]byte
 	// mu guards status and stepStart, which the heartbeat reads.
 	mu        sync.Mutex
 	status    *report.Status
@@ -105,14 +112,13 @@ func (r *Runner) run(ctx context.Context, req request) error {
 	proj := report.Open(req.dir)
 	status, err := proj.Status(req.id)
 	if err != nil {
-		return err
+		return errors.Join(err, os.RemoveAll(req.secrets))
 	}
-	x := &execution{r: r, req: req, proj: proj, status: status}
-	defer func() { _ = os.RemoveAll(req.secrets) }()
+	x := &execution{r: r, req: req, proj: proj, status: status, secrets: report.ReadSecrets(req.secrets)}
 
 	cfg, err := config.Load(req.dir)
 	if err != nil {
-		return errors.Join(err, x.finish(output.StateDone, int(output.ExitServer), err.Error()))
+		return errors.Join(err, x.clean(ctx), x.finish(output.StateDone, int(output.ExitServer), err.Error()))
 	}
 	beatCtx, stopBeat := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -128,7 +134,18 @@ func (r *Runner) run(ctx context.Context, req request) error {
 	if ctx.Err() != nil {
 		state, code, reason = output.StateCanceled, int(output.ExitFailed), output.StateCanceled
 	}
-	return errors.Join(err, x.finish(state, code, reason))
+	// Cleanup comes before the final status, so whoever sees the run end
+	// sees its leftovers gone too.
+	return errors.Join(err, x.clean(ctx), x.finish(state, code, reason))
+}
+
+// clean removes the run's docker leftovers and secrets. A cancel doesn't
+// stop it: cleaning up is what a cancel asks for.
+func (x *execution) clean(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanTimeout)
+	defer cancel()
+	_, err := Clean(ctx, x.req.key, x.req.secrets)
+	return err
 }
 
 func (x *execution) finish(state string, code int, reason string) error {
@@ -224,6 +241,10 @@ func (x *execution) step(ctx context.Context, i int, step *config.Step) (bool, e
 	if err != nil {
 		detail = err.Error()
 	}
+	if step.JUnit != "" {
+		// A report that can't be copied shows up as a step without one.
+		_ = x.proj.SaveReports(x.req.id, step.Name, step.JUnit, x.stepStart.Add(-time.Second), x.secrets)
+	}
 	passed := err == nil && code == 0 && detail == ""
 	if err := x.update(func() {
 		st.Exit, st.Detail = &code, detail
@@ -298,19 +319,21 @@ func hashFile(root *os.Root, name string) (string, error) {
 // exec runs the step's command until it exits, times out or the run is
 // canceled. detail says why a stopped step stopped.
 func (x *execution) exec(ctx context.Context, step *config.Step) (code int, detail string, err error) {
-	log, err := os.OpenFile(x.proj.LogFile(x.req.id, step.Name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	out, err := x.output(step.Name)
 	if err != nil {
-		return 0, "", fmt.Errorf("create log: %w", err)
+		return 0, "", err
 	}
-	defer func() { _ = log.Close() }()
+	defer func() { err = errors.Join(err, out.close()) }()
 	// The step stops through its process group, not through the context.
 	cmd := shell(context.WithoutCancel(ctx), x.req.dir, step.Run, nil)
 	cmd.Env = append(append(append([]string{}, x.r.env...), x.vars(step.Name)...), x.stepEnv(step)...)
-	cmd.Stdout, cmd.Stderr = log, log
+	cmd.Stdout, cmd.Stderr = out.w, out.w
 	// Its own session makes the step the leader of a new process group, so
 	// children started with & or nohup stay in reach.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	out.started()
+	if err != nil {
 		_, err = exitCode(err)
 		return 0, "", err
 	}
@@ -330,6 +353,68 @@ func (x *execution) exec(ctx context.Context, step *config.Step) (code int, deta
 	}
 	code, err = exitCode(x.r.stop(cmd.Process.Pid, done))
 	return code, detail, err
+}
+
+// stepOutput is where a step writes: its log file, or, when the run has
+// secrets, a pipe whose reader masks them on the way into the log. Secrets
+// never reach the disk unmasked.
+type stepOutput struct {
+	// w is what the step gets as stdout and stderr.
+	w    *os.File
+	r    *os.File
+	log  *os.File
+	done chan error
+}
+
+func (x *execution) output(step string) (*stepOutput, error) {
+	log, err := os.OpenFile(x.proj.LogFile(x.req.id, step), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create log: %w", err)
+	}
+	if len(x.secrets) == 0 {
+		return &stepOutput{w: log, log: log}, nil
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("create log pipe: %w", err), log.Close())
+	}
+	o := &stepOutput{w: w, r: r, log: log, done: make(chan error, 1)}
+	go func() {
+		m := report.NewMasker(log, x.secrets)
+		_, err := io.Copy(m, r)
+		if errors.Is(err, os.ErrClosed) {
+			// close gave up waiting for a leftover process.
+			err = nil
+		}
+		o.done <- errors.Join(err, m.Flush())
+	}()
+	return o, nil
+}
+
+// started drops the runner's own copy of the pipe's write end, so the
+// reader ends when the step's processes are gone.
+func (o *stepOutput) started() {
+	if o.r != nil {
+		_ = o.w.Close()
+	}
+}
+
+// close waits until the masker has written what the step printed, at most
+// drain past the step's end, then closes the log.
+func (o *stepOutput) close() error {
+	var err error
+	if o.r != nil {
+		timer := time.NewTimer(drain)
+		select {
+		case err = <-o.done:
+		case <-timer.C:
+			_ = o.r.Close()
+			err = <-o.done
+		}
+		timer.Stop()
+		_ = o.r.Close()
+	}
+	return errors.Join(err, o.log.Close())
 }
 
 // stop ends the step whose session is sid: SIGTERM to all of it, SIGKILL to
@@ -417,6 +502,8 @@ func (x *execution) stepEnv(step *config.Step) []string {
 func Exec(ctx context.Context, dir, script string, args []string, out io.Writer) (int, error) {
 	cmd := shell(ctx, dir, script, args)
 	cmd.Stdout, cmd.Stderr = out, out
+	// A process the command left running must not hold exec's output open.
+	cmd.WaitDelay = drain
 	return exitCode(cmd.Run())
 }
 
@@ -432,7 +519,9 @@ func shell(ctx context.Context, dir, script string, args []string) *exec.Cmd {
 // exitCode turns the result of a finished bash into its exit code. A
 // command killed by a signal reports 128 plus the signal, the way shells do.
 func exitCode(err error) (int, error) {
-	if err == nil {
+	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
+		// ErrWaitDelay means bash exited 0 and left a process holding its
+		// output.
 		return 0, nil
 	}
 	var exit *exec.ExitError

@@ -93,8 +93,13 @@ func Open(dir string) *Project {
 // Key is the run key: unique on the host, because two projects can both
 // have r1.
 func (p *Project) Key(id string) string {
+	return p.KeyPrefix() + id
+}
+
+// KeyPrefix starts the run key of every run of the project.
+func (p *Project) KeyPrefix() string {
 	sum := sha256.Sum256([]byte(p.dir))
-	return fmt.Sprintf("burro-%x-%s", sum[:4], id)
+	return fmt.Sprintf("burro-%x-", sum[:4])
 }
 
 // RunDir is the folder of run id.

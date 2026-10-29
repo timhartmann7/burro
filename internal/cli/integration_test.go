@@ -39,7 +39,12 @@ type world struct {
 
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
-	srv := testutil.StartServer(t)
+	return newWorldOn(t, testutil.StartServer(t), files)
+}
+
+// newWorldOn is newWorld on the server srv.
+func newWorldOn(t *testing.T, srv *testutil.Server, files map[string]string) *world {
+	t.Helper()
 	all := map[string]string{tomlFile: hostTOML}
 	for k, v := range files {
 		all[k] = v

@@ -282,6 +282,20 @@ func (a *App) registry() []command {
 			run:     a.status,
 		},
 		{
+			name:    "failures",
+			summary: "what failed and where",
+			group:   groupRun,
+			about:   "show what failed, where, and whether it is NEW or SEEN",
+			usage:   []string{"failures [id] [--max-lines 40]"},
+			flags: []flagSpec{
+				{name: "max-lines", arg: "n", def: "40", usage: "most lines to print, the last says what is left"},
+			},
+			maxArgs: 1,
+			example: "burro failures r42 --max-lines 100",
+			exits:   runExits("still running"),
+			run:     a.failures,
+		},
+		{
 			name:    cmdLog,
 			brief:   "log --step <name>",
 			summary: "clean log of one step, --grep to search it",
@@ -379,6 +393,22 @@ func (a *App) registry() []command {
 				{output.ExitServer, "hosts file unreadable"},
 			},
 			run: a.hostList,
+		},
+		{
+			name:    "clean",
+			summary: "remove a run's docker leftovers and secrets",
+			group:   groupServer,
+			about:   "remove a run's docker containers, networks, volumes and secrets",
+			usage:   []string{"clean [id]"},
+			maxArgs: 1,
+			example: "burro clean r42",
+			exits: []exitLabel{
+				{output.ExitPassed, "removed"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "unknown run"},
+				{output.ExitBusy, "the run is still active"},
+			},
+			run: a.clean,
 		},
 	}
 }
