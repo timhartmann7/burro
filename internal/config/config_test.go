@@ -21,6 +21,9 @@ const (
 	fieldDrop    = "filters.drop"
 	fieldRun     = "steps.test.run"
 	fieldSkip    = "steps.test.skip_if_unchanged"
+	fieldJUnit   = "steps.test.junit"
+	npmToken     = "npm-token\n"
+	stepTest     = "test"
 	verify       = "verify"
 	install      = "install"
 	unit         = "unit"
@@ -274,8 +277,6 @@ func TestParseRunRejects(t *testing.T) {
 		{name: "unknown filter", toml: head + minimal + "[filters]\nkeep = ['x']", field: "filters.keep"},
 		{name: "filters not a table", toml: head + "filters = 1\n" + minimal, field: "filters"},
 		{name: "typo in a step", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ncontinue_on_fial = true", field: "steps.test.continue_on_fial"},
-		{name: "junit comes in S3", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\njunit = \"a.xml\"", field: "steps.test.junit"},
-		{name: "secrets come in S3", toml: head + minimal + "[secrets]\nnpmrc = \"~/.npmrc\"", field: `"secrets"`},
 		{name: "empty run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"\"", field: fieldRun},
 		{name: "blank run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"  \"", field: fieldRun},
 		{name: "missing run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\ntimeout = \"1m\"", field: fieldRun},
@@ -308,10 +309,10 @@ func TestParseRunRejects(t *testing.T) {
 // that stay out.
 func describe(sel []config.Selected) string {
 	parts := make([]string, 0, len(sel))
-	for _, s := range sel {
-		part := s.Step.Name
-		if s.Skip != "" {
-			part += "(" + s.Skip + ")"
+	for i := range sel {
+		part := sel[i].Step.Name
+		if sel[i].Skip != "" {
+			part += "(" + sel[i].Skip + ")"
 		}
 		parts = append(parts, part)
 	}
@@ -410,9 +411,9 @@ func checkSelection(t *testing.T, c *config.Config, pipeline, from string) {
 		usageError(t, err)
 		return
 	}
-	for _, s := range sel {
-		if s.Step.Run == "" || s.Step.Timeout < time.Second || s.Step.Timeout > 24*time.Hour {
-			t.Fatalf("accepted an invalid step %+v", s.Step)
+	for i := range sel {
+		if st := &sel[i].Step; st.Run == "" || st.Timeout < time.Second || st.Timeout > 24*time.Hour {
+			t.Fatalf("accepted an invalid step %+v", st)
 		}
 	}
 }
@@ -431,4 +432,108 @@ func FuzzConfigParse(f *testing.F) {
 		}
 		usageError(t, err)
 	})
+}
+
+// step is a pipeline with one step test whose extra fields are fields.
+func step(fields string) string {
+	return "host = \"vps1\"\n[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\n" + fields
+}
+
+func TestParseReportsAndSecrets(t *testing.T) {
+	c, err := config.Parse([]byte(step("junit = \"./target/surefire-reports/*.xml\"\nsecrets = [\"npmrc\", \"token\"]\n"+
+		"[secrets]\nnpmrc = \"~/.npmrc\"\ntoken = \"/etc/token\"\nunused = \"keys/a\"\n")), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := c.Step(stepTest)
+	if st.JUnit != "target/surefire-reports/*.xml" || strings.Join(st.Secrets, " ") != "npmrc token" {
+		t.Fatalf("step %+v", st)
+	}
+	if st, _ := mustParse(t, minimal).Step(stepTest); st.JUnit != "" || st.Secrets != nil {
+		t.Fatalf("defaults %+v", st)
+	}
+}
+
+func mustParse(t *testing.T, toml string) *config.Config {
+	t.Helper()
+	c, err := config.Parse([]byte("host = \"vps1\"\n"+toml), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestParseReportsAndSecretsRejects(t *testing.T) {
+	tests := []struct {
+		name  string
+		toml  string
+		field string
+	}{
+		{name: "junit outside", toml: step(`junit = "../out.xml"`), field: fieldJUnit},
+		{name: "junit absolute", toml: step(`junit = "/tmp/out.xml"`), field: fieldJUnit},
+		{name: "junit bad glob", toml: step(`junit = "out/[.xml"`), field: fieldJUnit},
+		{name: "junit not a string", toml: step(`junit = ["a.xml"]`), field: fieldJUnit},
+		{name: "unknown secret", toml: step(`secrets = ["npmrc"]`), field: "steps.test.secrets"},
+		{name: "secrets not a list", toml: step(`secrets = "npmrc"`), field: "steps.test.secrets"},
+		{name: "bad secret name", toml: step("[secrets]\n\"../x\" = \"a\""), field: `"../x"`},
+		{name: "secret not a string", toml: step("[secrets]\nnpmrc = 1"), field: "secrets.npmrc"},
+		{name: "empty secret file", toml: step("[secrets]\nnpmrc = \"\""), field: "secrets.npmrc"},
+		{name: "secrets not a table", toml: "secrets = 1\n" + step(""), field: "secrets"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.toml), "myapp")
+			msg, fix := usageError(t, err)
+			if !strings.Contains(msg+" "+fix, tt.field) {
+				t.Fatalf("error %q / fix %q doesn't name %s", msg, fix, tt.field)
+			}
+		})
+	}
+}
+
+// acceptance: S3-15
+func TestSecretsRead(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	for path, data := range map[string]string{filepath.Join(home, ".npmrc"): npmToken, filepath.Join(root, "keys", "a"): "key a"} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	abs := filepath.Join(home, ".npmrc")
+	c := mustParse(t, "[pipelines]\ndefault = [\"a\", \"b\", \"c\"]\n"+
+		"[steps.a]\nrun = \"x\"\nsecrets = [\"npmrc\", \"key\"]\n[steps.b]\nrun = \"x\"\nsecrets = [\"npmrc\", \"abs\"]\n"+
+		"[steps.c]\nrun = \"x\"\nsecrets = [\"gone\"]\n"+
+		"[secrets]\nnpmrc = \"~/.npmrc\"\nkey = \"keys/a\"\nabs = \""+abs+"\"\ngone = \"~/missing\"\n")
+	sel, err := c.Select(config.DefaultPipeline, "", []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Secrets(sel, root, home)
+	if err != nil || len(got) != 3 || string(got["npmrc"]) != npmToken || string(got["key"]) != "key a" || string(got["abs"]) != npmToken {
+		t.Fatalf("secrets %q, %v", got, err)
+	}
+	// A step that runs needs its secret; one that doesn't run needs nothing.
+	sel, err = c.Select(config.DefaultPipeline, "c", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Secrets(sel, root, home)
+	if msg, fix := usageError(t, err); msg != "secret gone: ~/missing does not exist" || !strings.Contains(fix, "secrets.gone") {
+		t.Fatalf("missing: %q / %q", msg, fix)
+	}
+	if os.Geteuid() == 0 {
+		return
+	}
+	if err := os.Chmod(abs, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	sel, _ = c.Select(config.DefaultPipeline, "b", []string{"b"})
+	if _, err := c.Secrets(sel, root, home); err == nil {
+		t.Fatal("unreadable secret passed")
+	} else {
+		usageError(t, err)
+	}
 }
