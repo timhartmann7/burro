@@ -136,6 +136,12 @@ check: $(GOLANGCI)
 acceptance:
 	scripts/acceptance.sh $(SLICE)
 
-# The Linux server binaries join this target with internal/serverbin in S1.
+# The Linux binaries are built while internal/serverbin/bin/ holds only its
+# README, so they don't embed each other, then copied there for the client.
 build:
+	rm -f internal/serverbin/bin/burro-linux-*
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -o bin/burro-linux-$$arch ./cmd/burro || exit 1; \
+	done
+	cp bin/burro-linux-amd64 bin/burro-linux-arm64 internal/serverbin/bin/
 	CGO_ENABLED=0 go build -trimpath -o bin/burro ./cmd/burro

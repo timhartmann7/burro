@@ -1,0 +1,2 @@
+host = "vps1"
+path = "/srv/app/"

@@ -1,4 +1,5 @@
-// Package output owns the exit codes and the error type that carries them.
+// Package output owns the exit codes, the error type that carries them and
+// the rendering of every command's result as text or JSON.
 package output
 
 import (
@@ -32,8 +33,24 @@ func NewError(code Code, msg, fix string) *Error {
 	return &Error{code: code, msg: msg, fix: fix}
 }
 
+// Silent returns an error that only sets the exit code. The command already
+// printed everything the user needs, such as a remote command's own output.
+func Silent(code Code) *Error {
+	return &Error{code: code}
+}
+
 func (e *Error) Error() string {
 	return e.msg
+}
+
+// Code is the exit code the error maps to.
+func (e *Error) Code() Code {
+	return e.code
+}
+
+// Fix is the concrete next step printed after the message.
+func (e *Error) Fix() string {
+	return e.fix
 }
 
 // Report writes err to w as burro's error lines and returns the exit code for
@@ -49,6 +66,9 @@ func Report(w io.Writer, err error) int {
 		// closed stdout, so it counts as an environment problem.
 		_, _ = fmt.Fprintf(w, "burro: %s\n", err)
 		return int(ExitServer)
+	}
+	if e.msg == "" {
+		return int(e.code)
 	}
 	_, _ = fmt.Fprintf(w, "burro: %s\nfix: %s\n", err, e.fix)
 	return int(e.code)

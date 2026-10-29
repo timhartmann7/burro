@@ -1,0 +1,8 @@
+burro sync · copy the code to the server and record its tree hash
+
+Usage: burro sync
+
+Example
+  burro sync
+
+Exit codes  0 synced · 2 server problem · 4 bad burro.toml

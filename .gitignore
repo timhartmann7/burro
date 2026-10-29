@@ -2,3 +2,5 @@
 /CLAUDE.md
 /.bin/
 /bin/
+/internal/serverbin/bin/*
+!/internal/serverbin/bin/README

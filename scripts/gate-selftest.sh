@@ -79,18 +79,20 @@ import "golang.org/x/tools/cover"
 var Planted = cover.ParseProfiles
 EOF
 go mod edit -require="golang.org/x/tools@$(awk '$1 == "golang.org/x/tools" { print $2 }' tools/go.mod)"
-cp tools/go.sum go.sum
+# Merged, so the modules the code already uses still type-check.
+sort -u -o go.sum go.sum tools/go.sum
 expect "module outside the allowlist" "not allowed from list 'module'" mk lint
 
-mkdir -p internal/config
+# agent imports no layer 1 package, so the planted import makes no cycle that
+# would fail type checking before depguard runs.
 cat >internal/config/planted.go <<'EOF'
-// Package config reaches from layer 1 up to layer 3.
+// Package config reaches from layer 1 up to layer 2.
 package config
 
-import "github.com/timhartmann7/burro/internal/cli"
+import "github.com/timhartmann7/burro/internal/agent"
 
 // Planted breaks the import layers.
-var Planted = cli.New
+var Planted = agent.New
 EOF
 expect "import across layers" "not allowed from list 'layer-1'" mk lint
 

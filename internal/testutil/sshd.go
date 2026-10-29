@@ -23,6 +23,9 @@ type Server struct {
 	home       string
 	config     string
 	controlDir string
+	port       string
+	key        string
+	hostKey    string
 	stopped    bool
 }
 
@@ -34,7 +37,17 @@ func StartServer(tb testing.TB) *Server {
 	requireDocker(tb)
 	image := mustRun(tb, "docker", "build", "--quiet", filepath.Join(moduleRoot(tb), "test", "sshd"))
 
-	home := tb.TempDir()
+	// ssh control sockets under HOME must stay short: about 100 bytes, and
+	// TempDir paths on macOS are already longer than that.
+	home, err := os.MkdirTemp("/tmp", "burro-home-")
+	if err != nil {
+		tb.Fatalf("create home: %v", err)
+	}
+	tb.Cleanup(func() {
+		if err := os.RemoveAll(home); err != nil {
+			tb.Errorf("remove home: %v", err)
+		}
+	})
 	sshDir := filepath.Join(home, ".ssh")
 	if err := os.Mkdir(sshDir, 0o700); err != nil {
 		tb.Fatalf("create .ssh: %v", err)
@@ -46,8 +59,6 @@ func StartServer(tb testing.TB) *Server {
 		tb.Fatalf("read public key: %v", err)
 	}
 
-	// ControlPath sockets are limited to about 100 bytes, and TempDir paths
-	// on macOS are already longer than that.
 	controlDir, err := os.MkdirTemp("/tmp", "burro-cm-")
 	if err != nil {
 		tb.Fatalf("create control dir: %v", err)
@@ -63,6 +74,7 @@ func StartServer(tb testing.TB) *Server {
 		home:       home,
 		config:     filepath.Join(sshDir, "config"),
 		controlDir: controlDir,
+		key:        key,
 	}
 	tb.Cleanup(func() {
 		s.Stop(tb)
@@ -76,6 +88,7 @@ func StartServer(tb testing.TB) *Server {
 	if !ok {
 		tb.Fatalf("docker port: unexpected output %q", port)
 	}
+	s.port = port
 	var hostKey string
 	Poll(tb, readyTimeout, func() error {
 		hostKey, err = run("docker", "exec", s.container, "cat", "/etc/ssh/ssh_host_ed25519_key.pub")
@@ -85,17 +98,21 @@ func StartServer(tb testing.TB) *Server {
 	if len(fields) < 2 {
 		tb.Fatalf("host key: unexpected output %q", hostKey)
 	}
-	knownHosts := filepath.Join(sshDir, "known_hosts")
-	writeFile(tb, knownHosts, fmt.Sprintf("[127.0.0.1]:%s %s %s\n", port, fields[0], fields[1]))
+	s.hostKey = fmt.Sprintf("[127.0.0.1]:%s %s %s\n", port, fields[0], fields[1])
+	writeFile(tb, s.KnownHosts(), s.hostKey)
+	// ssh finds ~ through the passwd entry, not HOME, so every host gets the
+	// test's known_hosts and no agent from the developer's session.
 	writeFile(tb, s.config, fmt.Sprintf(`Host %s
   HostName 127.0.0.1
   Port %s
   User burro
   IdentityFile %s
+
+Host *
   IdentitiesOnly yes
   IdentityAgent none
   UserKnownHostsFile %s
-`, sshHost, port, key, knownHosts))
+`, sshHost, port, key, s.KnownHosts()))
 
 	Poll(tb, readyTimeout, func() error {
 		_, err := s.SSH("true")
@@ -108,6 +125,43 @@ func StartServer(tb testing.TB) *Server {
 // entry for the server.
 func (s *Server) Home() string {
 	return s.home
+}
+
+// Alias is the ssh alias the user config in Home has for the server.
+func (s *Server) Alias() string {
+	return sshHost
+}
+
+// Address is user@host:port of the server.
+func (s *Server) Address() string {
+	return "burro@127.0.0.1:" + s.port
+}
+
+// Key is the private key that logs in to the server.
+func (s *Server) Key() string {
+	return s.key
+}
+
+// KnownHosts is the known_hosts file of Home.
+func (s *Server) KnownHosts() string {
+	return filepath.Join(s.home, ".ssh", "known_hosts")
+}
+
+// HostKeyLine is the known_hosts line for the server.
+func (s *Server) HostKeyLine() string {
+	return s.hostKey
+}
+
+// Exec runs args in the container as the login user, without ssh.
+func (s *Server) Exec(tb testing.TB, args ...string) string {
+	tb.Helper()
+	return mustRun(tb, "docker", append([]string{"exec", "--user", "burro", "--workdir", "/home/burro", s.container}, args...)...)
+}
+
+// Root runs args in the container as root, to break the server on purpose.
+func (s *Server) Root(tb testing.TB, args ...string) string {
+	tb.Helper()
+	return mustRun(tb, "docker", append([]string{"exec", s.container}, args...)...)
 }
 
 // SSH runs args on the server with the options burro passes to every call,
@@ -132,9 +186,13 @@ func (s *Server) Stop(tb testing.TB) {
 		return
 	}
 	s.stopped = true
-	// The control master may already be gone; removing the container is
-	// what has to succeed.
+	// The control masters may already be gone; removing the container is
+	// what has to succeed. burro's own masters live under HOME.
 	_, _ = run("ssh", append(s.sshOptions(), "-O", "exit", sshHost)...)
+	sockets, _ := filepath.Glob(filepath.Join(s.home, ".burro", "cm", "*"))
+	for _, socket := range sockets {
+		_, _ = run("ssh", "-o", "ControlPath="+socket, "-O", "exit", "burro-cleanup")
+	}
 	if _, err := run("docker", "rm", "--force", s.container); err != nil {
 		tb.Errorf("remove container: %v", err)
 	}

@@ -1,0 +1,6 @@
+ssh     [32mok[0m    82ms round trip
+rsync   [31mFAIL[0m  not found · install rsync on the server, for example apt install rsync
+bash    [32mok[0m    5.2.37
+docker  [32mok[0m    not found, needed only if steps use docker
+disk    [32mok[0m    41.2 GB free in /home/burro
+burro   [32mok[0m    0.1.0

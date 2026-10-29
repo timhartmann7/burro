@@ -1,0 +1,8 @@
+burro host ls · list your servers with their server binary version
+
+Usage: burro host ls
+
+Example
+  burro host ls
+
+Exit codes  0 listed · 2 hosts file unreadable
