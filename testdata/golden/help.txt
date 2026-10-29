@@ -1,0 +1,8 @@
+burro · run your coding agent's tests on your own server
+
+Usage: burro <command> [flags]
+
+Exit codes  0 passed · 1 tests failed · 2 server problem · 3 still running
+            4 bad config or flags · 5 another run is active
+
+burro <command> --help   details and an example
