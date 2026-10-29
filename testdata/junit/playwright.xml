@@ -1,0 +1,197 @@
+<testsuites id="" name="" tests="12" failures="3" skipped="3" errors="3" time="0.7213200000000001">
+<testsuite name="site.spec.js" timestamp="2026-10-29T16:06:05.721Z" hostname="chromium" tests="4" failures="1" skipped="1" time="0.013" errors="1">
+<testcase name="[chromium] home page loads" classname="site.spec.js" time="0.005">
+</testcase>
+<testcase name="[chromium] cohorts are listed" classname="site.spec.js" time="0.006">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-cohorts-are-listed-chromium/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toHaveLength(expected)" type="expect.toHaveLength">
+<![CDATA[  [chromium] › site.spec.js:8:1 › cohorts are listed ───────────────────────────────────────────────
+
+    Error: expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 2
+    Received array:  ["spring", "autumn"]
+
+       8 | test('cohorts are listed', async () => {
+       9 |   const cohorts = ['spring', 'autumn']
+    > 10 |   expect(cohorts).toHaveLength(3)
+         |                   ^
+      11 | })
+      12 |
+      13 | test('roles load', async () => {
+        at /app/e2e/site.spec.js:10:19
+
+    Error Context: ../test-results/site-cohorts-are-listed-chromium/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="[chromium] roles load" classname="site.spec.js" time="0.002">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-roles-load-chromium/error-context.md]]
+]]>
+</system-out>
+<error message="roles are missing" type="TypeError">
+<![CDATA[  [chromium] › site.spec.js:13:1 › roles load ──────────────────────────────────────────────────────
+
+    TypeError: roles are missing
+
+      12 |
+      13 | test('roles load', async () => {
+    > 14 |   badlib.explode('roles are missing')
+         |          ^
+      15 | })
+      16 |
+      17 | test.skip('admin can log in', async () => {
+        at Object.explode (/app/node_modules/badlib/index.js:2:9)
+        at /app/e2e/site.spec.js:14:10
+
+    Error Context: ../test-results/site-roles-load-chromium/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="[chromium] admin can log in" classname="site.spec.js">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="site.spec.js" timestamp="2026-10-29T16:06:05.721Z" hostname="firefox" tests="4" failures="1" skipped="1" time="0.01" errors="1">
+<testcase name="[firefox] home page loads" classname="site.spec.js" time="0.004">
+</testcase>
+<testcase name="[firefox] cohorts are listed" classname="site.spec.js" time="0.003">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-cohorts-are-listed-firefox/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toHaveLength(expected)" type="expect.toHaveLength">
+<![CDATA[  [firefox] › site.spec.js:8:1 › cohorts are listed ────────────────────────────────────────────────
+
+    Error: expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 2
+    Received array:  ["spring", "autumn"]
+
+       8 | test('cohorts are listed', async () => {
+       9 |   const cohorts = ['spring', 'autumn']
+    > 10 |   expect(cohorts).toHaveLength(3)
+         |                   ^
+      11 | })
+      12 |
+      13 | test('roles load', async () => {
+        at /app/e2e/site.spec.js:10:19
+
+    Error Context: ../test-results/site-cohorts-are-listed-firefox/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="[firefox] roles load" classname="site.spec.js" time="0.003">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-roles-load-firefox/error-context.md]]
+]]>
+</system-out>
+<error message="roles are missing" type="TypeError">
+<![CDATA[  [firefox] › site.spec.js:13:1 › roles load ───────────────────────────────────────────────────────
+
+    TypeError: roles are missing
+
+      12 |
+      13 | test('roles load', async () => {
+    > 14 |   badlib.explode('roles are missing')
+         |          ^
+      15 | })
+      16 |
+      17 | test.skip('admin can log in', async () => {
+        at Object.explode (/app/node_modules/badlib/index.js:2:9)
+        at /app/e2e/site.spec.js:14:10
+
+    Error Context: ../test-results/site-roles-load-firefox/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="[firefox] admin can log in" classname="site.spec.js">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="site.spec.js" timestamp="2026-10-29T16:06:05.721Z" hostname="webkit" tests="4" failures="1" skipped="1" time="0.012" errors="1">
+<testcase name="[webkit] home page loads" classname="site.spec.js" time="0.007">
+</testcase>
+<testcase name="[webkit] cohorts are listed" classname="site.spec.js" time="0.003">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-cohorts-are-listed-webkit/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toHaveLength(expected)" type="expect.toHaveLength">
+<![CDATA[  [webkit] › site.spec.js:8:1 › cohorts are listed ─────────────────────────────────────────────────
+
+    Error: expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 2
+    Received array:  ["spring", "autumn"]
+
+       8 | test('cohorts are listed', async () => {
+       9 |   const cohorts = ['spring', 'autumn']
+    > 10 |   expect(cohorts).toHaveLength(3)
+         |                   ^
+      11 | })
+      12 |
+      13 | test('roles load', async () => {
+        at /app/e2e/site.spec.js:10:19
+
+    Error Context: ../test-results/site-cohorts-are-listed-webkit/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="[webkit] roles load" classname="site.spec.js" time="0.002">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/site-roles-load-webkit/error-context.md]]
+]]>
+</system-out>
+<error message="roles are missing" type="TypeError">
+<![CDATA[  [webkit] › site.spec.js:13:1 › roles load ────────────────────────────────────────────────────────
+
+    TypeError: roles are missing
+
+      12 |
+      13 | test('roles load', async () => {
+    > 14 |   badlib.explode('roles are missing')
+         |          ^
+      15 | })
+      16 |
+      17 | test.skip('admin can log in', async () => {
+        at Object.explode (/app/node_modules/badlib/index.js:2:9)
+        at /app/e2e/site.spec.js:14:10
+
+    Error Context: ../test-results/site-roles-load-webkit/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="[webkit] admin can log in" classname="site.spec.js">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

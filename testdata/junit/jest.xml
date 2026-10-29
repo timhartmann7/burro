@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="4" failures="2" errors="0" time="0.158">
+  <testsuite name="calc" errors="0" failures="2" skipped="1" timestamp="2026-10-29T16:06:05" time="0.107" tests="4">
+    <testcase classname="calc adds numbers" name="calc adds numbers" time="0.001">
+    </testcase>
+    <testcase classname="calc divides numbers" name="calc divides numbers" time="0.001">
+      <failure>Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: 3
+Received: 2
+    at Object.toBe (/app/jest/calc.test.js:9:19)
+    at Promise.finally.completed (/app/node_modules/jest-circus/build/jestAdapterInit.js:1834:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/app/node_modules/jest-circus/build/jestAdapterInit.js:1774:10)
+    at _callCircusTest (/app/node_modules/jest-circus/build/jestAdapterInit.js:1167:40)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _runTestInContext (/app/node_modules/jest-circus/build/jestAdapterInit.js:1103:3)
+    at runTestWithContext (/app/node_modules/jest-circus/build/jestAdapterInit.js:996:5)
+    at _runTestsForDescribeBlockOnce (/app/node_modules/jest-circus/build/jestAdapterInit.js:1008:11)
+    at _runTestsForDescribeBlock (/app/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at _runTestsForDescribeBlockOnce (/app/node_modules/jest-circus/build/jestAdapterInit.js:1003:11)
+    at _runTestsForDescribeBlock (/app/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at run (/app/node_modules/jest-circus/build/jestAdapterInit.js:789:3)
+    at runAndTransformResultsToJestFormat (/app/node_modules/jest-circus/build/jestAdapterInit.js:2300:21)
+    at jestAdapter (/app/node_modules/jest-circus/build/runner.js:111:19)
+    at runTestInternal (/app/node_modules/jest-runner/build/index.js:247:16)
+    at runTest (/app/node_modules/jest-runner/build/index.js:315:7)</failure>
+    </testcase>
+    <testcase classname="calc parses the config" name="calc parses the config" time="0.001">
+      <failure>TypeError: config is broken
+    at Object.explode (/app/node_modules/badlib/index.js:2:9)
+    at Object.explode (/app/jest/calc.test.js:13:12)
+    at Promise.finally.completed (/app/node_modules/jest-circus/build/jestAdapterInit.js:1834:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/app/node_modules/jest-circus/build/jestAdapterInit.js:1774:10)
+    at _callCircusTest (/app/node_modules/jest-circus/build/jestAdapterInit.js:1167:40)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _runTestInContext (/app/node_modules/jest-circus/build/jestAdapterInit.js:1103:3)
+    at runTestWithContext (/app/node_modules/jest-circus/build/jestAdapterInit.js:996:5)
+    at _runTestsForDescribeBlockOnce (/app/node_modules/jest-circus/build/jestAdapterInit.js:1008:11)
+    at _runTestsForDescribeBlock (/app/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at _runTestsForDescribeBlockOnce (/app/node_modules/jest-circus/build/jestAdapterInit.js:1003:11)
+    at _runTestsForDescribeBlock (/app/node_modules/jest-circus/build/jestAdapterInit.js:824:5)
+    at run (/app/node_modules/jest-circus/build/jestAdapterInit.js:789:3)
+    at runAndTransformResultsToJestFormat (/app/node_modules/jest-circus/build/jestAdapterInit.js:2300:21)
+    at jestAdapter (/app/node_modules/jest-circus/build/runner.js:111:19)
+    at runTestInternal (/app/node_modules/jest-runner/build/index.js:247:16)
+    at runTest (/app/node_modules/jest-runner/build/index.js:315:7)</failure>
+    </testcase>
+    <testcase classname="calc multiplies numbers" name="calc multiplies numbers" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>
