@@ -448,6 +448,9 @@ func TestTerminalModes(t *testing.T) {
 
 var roundTrip = regexp.MustCompile(`\d+ms round trip`)
 
+// freeDisk is the disk line's number, which moves while other tests write.
+var freeDisk = regexp.MustCompile(`\d+\.\d GB free`)
+
 // acceptance: S1-15
 func TestModesPrintSameText(t *testing.T) {
 	w := newWorld(t, nil)
@@ -476,6 +479,7 @@ func TestModesPrintSameText(t *testing.T) {
 		}
 		mask := func(s string) string {
 			s = roundTrip.ReplaceAllString(testutil.StripANSI(s), "Nms round trip")
+			s = freeDisk.ReplaceAllString(s, "N GB free")
 			return regexp.MustCompile(`\d+\.\ds\n`).ReplaceAllString(s, "N.Ns\n")
 		}
 		if mask(human.Stdout) != mask(agent.Stdout) || human.Code != agent.Code {
