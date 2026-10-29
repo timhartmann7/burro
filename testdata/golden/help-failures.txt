@@ -1,0 +1,11 @@
+burro failures · show what failed, where, and whether it is NEW or SEEN
+
+Usage: burro failures [id] [--max-lines 40]
+
+  --max-lines n    most lines to print, the last says what is left (default 40)
+
+Example
+  burro failures r42 --max-lines 100
+
+Exit codes  0 passed · 1 tests failed · 2 server problem or runner died
+            3 still running · 4 bad flags or unknown run

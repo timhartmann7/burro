@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +38,10 @@ const (
 	rsyncTemp = ".burro/tmp"
 	// readyTimeout bounds how long start waits for the runner to take over.
 	readyTimeout = 10 * time.Second
+	// cleanTimeout bounds one clean call.
+	cleanTimeout = 2 * time.Minute
+	// maxSecrets caps the secrets start reads from stdin.
+	maxSecrets = 8 << 20
 )
 
 // flags is the flag set of one run call; every call takes --path.
@@ -106,6 +112,10 @@ func (e *Executor) start(args []string) (*output.Started, error) {
 	if err != nil {
 		return nil, err
 	}
+	secrets, err := e.readSecrets()
+	if err != nil {
+		return nil, err
+	}
 	dir, selected, err := e.selection(f.path, pipeline, from, only)
 	if err != nil {
 		return nil, err
@@ -130,9 +140,35 @@ func (e *Executor) start(args []string) (*output.Started, error) {
 		if err := proj.WriteStatus(status); err != nil {
 			return err
 		}
-		return e.launch(proj, dir, id)
+		return e.launch(proj, dir, id, secrets)
 	})
 	return started, err
+}
+
+// readSecrets reads the secrets the client sends on stdin as one JSON
+// object of name to contents. They never travel in arguments.
+func (e *Executor) readSecrets() (map[string][]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(e.stdin, maxSecrets+1))
+	if err != nil {
+		return nil, fmt.Errorf("read secrets: %w", err)
+	}
+	secrets := map[string][]byte{}
+	if len(data) == 0 {
+		return secrets, nil
+	}
+	if len(data) > maxSecrets {
+		return nil, output.NewError(output.ExitUsage, "the secrets of this run are over 8 MiB",
+			"keep only the secrets the steps need in [secrets] of "+config.File)
+	}
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return nil, output.NewError(output.ExitServer, "the secrets sent with the run are broken", "rerun")
+	}
+	for name := range secrets {
+		if err := config.ValidName("secret", name); err != nil {
+			return nil, err
+		}
+	}
+	return secrets, nil
 }
 
 // selection reads burro.toml in the project folder and selects the steps
@@ -159,7 +195,8 @@ func (e *Executor) selection(path, pipeline, from, only string) (string, []confi
 func newStatus(id, pipeline, treeHash string, selected []config.Selected) *report.Status {
 	now := report.Stamp(time.Now())
 	status := &report.Status{Run: id, Pipeline: pipeline, Tree: treeHash, State: output.StateRunning, Started: now, Heartbeat: now}
-	for _, sel := range selected {
+	for i := range selected {
+		sel := &selected[i]
 		step := report.Step{Name: sel.Step.Name, State: output.StatePending}
 		if sel.Skip != "" {
 			step.State, step.Detail = output.StateNotRun, sel.Skip
@@ -169,13 +206,14 @@ func newStatus(id, pipeline, treeHash string, selected []config.Selected) *repor
 	return status
 }
 
-// launch takes the lock for run id and starts its runner. A runner that
-// doesn't start leaves a run that failed with the reason.
-func (e *Executor) launch(proj *report.Project, dir, id string) error {
+// launch takes the lock for run id, writes its secrets and starts its
+// runner. A runner that doesn't start leaves a run that failed with the
+// reason.
+func (e *Executor) launch(proj *report.Project, dir, id string, values map[string][]byte) error {
 	key := proj.Key(id)
-	secrets := filepath.Join(e.secrets, key)
-	if err := os.MkdirAll(secrets, 0o700); err != nil {
-		return fmt.Errorf("create secrets folder: %w", err)
+	secrets, err := e.writeSecrets(proj, key, values)
+	if err != nil {
+		return errors.Join(err, e.abandon(proj, id, err))
 	}
 	if err := proj.Take(id); err != nil {
 		return err
@@ -221,6 +259,49 @@ func (e *Executor) launch(proj *report.Project, dir, id string) error {
 	return nil
 }
 
+// writeSecrets creates the tmpfs folder of run key with one file per
+// secret, after removing the folders that dead runs of the project left.
+// The caller holds the lock, so no run of the project is alive.
+func (e *Executor) writeSecrets(proj *report.Project, key string, values map[string][]byte) (string, error) {
+	if err := os.Mkdir(e.secrets, 0o700); err == nil {
+		// Every user's runs share the folder, the way they share /dev/shm;
+		// the sticky bit keeps each user's run folders their own.
+		if err := os.Chmod(e.secrets, 0o777|os.ModeSticky); err != nil {
+			return "", fmt.Errorf("create secrets folder: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("create secrets folder: %w", err)
+	}
+	dead, _ := filepath.Glob(filepath.Join(e.secrets, proj.KeyPrefix()+"*"))
+	for _, d := range dead {
+		if err := os.RemoveAll(d); err != nil {
+			return "", fmt.Errorf("remove secrets of a dead run: %w", err)
+		}
+	}
+	dir := filepath.Join(e.secrets, key)
+	// Mkdir fails on a folder that is there already, so nobody else's
+	// folder can receive the secrets.
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create secrets folder: %w", err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", fmt.Errorf("open secrets folder: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	for name, value := range values {
+		f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return "", fmt.Errorf("write secret %s: %w", name, err)
+		}
+		_, err = f.Write(value)
+		if err := errors.Join(err, f.Close()); err != nil {
+			return "", fmt.Errorf("write secret %s: %w", name, err)
+		}
+	}
+	return dir, nil
+}
+
 // abandon records a run whose runner never started.
 func (e *Executor) abandon(proj *report.Project, id string, cause error) error {
 	status, err := proj.Status(id)
@@ -232,7 +313,19 @@ func (e *Executor) abandon(proj *report.Project, id string, cause error) error {
 }
 
 func (e *Executor) status(args []string) (*output.Summary, string, error) {
-	f := newFlags("status")
+	return e.current("status", args, false)
+}
+
+// failures is the summary wait prints at the end, for any run.
+func (e *Executor) failures(args []string) (*output.Summary, error) {
+	sum, _, err := e.current("failures", args, true)
+	return sum, err
+}
+
+// current returns the summary of a run as it is now, and its full tree
+// hash.
+func (e *Executor) current(action string, args []string, details bool) (*output.Summary, string, error) {
+	f := newFlags(action)
 	id, err := f.parse(args)
 	if err != nil {
 		return nil, "", err
@@ -245,11 +338,46 @@ func (e *Executor) status(args []string) (*output.Summary, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	sum, err := summary(dir, proj, status, false)
+	sum, err := summary(dir, proj, status, details)
 	if err != nil {
 		return nil, "", err
 	}
 	return sum, status.Tree, nil
+}
+
+// cleanRun removes the docker leftovers and secrets of a run that no
+// longer runs; those of a live run are still in use.
+func (e *Executor) cleanRun(args []string) (*output.Cleaned, error) {
+	f := newFlags("clean")
+	id, err := f.parse(args)
+	if err != nil {
+		return nil, err
+	}
+	_, proj, id, err := e.run(f.path, id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := proj.Status(id); err != nil {
+		return nil, err
+	}
+	err = proj.Locked(func() error {
+		if proj.Holder() == id {
+			return report.Busy(id)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	key := proj.Key(id)
+	ctx, cancel := context.WithTimeout(context.Background(), cleanTimeout)
+	defer cancel()
+	cleaned, err := e.clean(ctx, key, filepath.Join(e.secrets, key))
+	if err != nil {
+		return nil, err
+	}
+	cleaned.Run = id
+	return cleaned, nil
 }
 
 // wait checks status.json once a second and returns the summary when the
@@ -350,18 +478,18 @@ func (e *Executor) cancel(args []string) (*output.Summary, error) {
 	return summary(dir, proj, status, false)
 }
 
-// summary builds what status, wait and cancel return. Tails need the drop
-// filters of burro.toml.
-func summary(dir string, proj *report.Project, status *report.Status, tails bool) (*output.Summary, error) {
+// summary builds what status, wait, failures and cancel return. Details
+// are failures and log tails; tails need the drop filters of burro.toml.
+func summary(dir string, proj *report.Project, status *report.Status, details bool) (*output.Summary, error) {
 	cleaner := report.NewCleaner(nil)
-	if tails {
+	if details {
 		cfg, err := config.Load(dir)
 		if err != nil {
 			return nil, err
 		}
 		cleaner = report.NewCleaner(cfg.Drop())
 	}
-	sum, err := proj.Summary(status, cleaner, tails, maxShown, time.Now())
+	sum, err := proj.Summary(status, cleaner, details, maxShown, time.Now())
 	if err != nil {
 		return nil, err
 	}

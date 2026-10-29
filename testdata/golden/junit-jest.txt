@@ -1,0 +1,7 @@
+total 4 · failed 2 · skipped 1
+jest/calc.test.js:0  calc divides numbers
+  message: Error: expect(received).toBe(expected) // Object.is equality
+  frame: jest/calc.test.js:9
+jest/calc.test.js:0  calc parses the config
+  message: TypeError: config is broken
+  frame: jest/calc.test.js:13

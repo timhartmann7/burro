@@ -39,6 +39,8 @@ type server struct {
 	dir     string
 	runner  []string
 	secrets string
+	// stdin is what the next call reads, such as the secrets of a start.
+	stdin string
 }
 
 func newServer(t *testing.T, bin, toml string) *server {
@@ -54,7 +56,7 @@ func newServer(t *testing.T, bin, toml string) *server {
 func (s *server) call(args ...string) []agent.Reply {
 	s.t.Helper()
 	var out strings.Builder
-	if err := agent.New(strings.NewReader(""), &out, s.home, s.runner, s.secrets, runner.Exec).Run(args); err != nil {
+	if err := agent.New(strings.NewReader(s.stdin), &out, s.home, s.runner, s.secrets, runner.Exec, runner.Clean).Run(args); err != nil {
 		s.t.Fatal(err)
 	}
 	var replies []agent.Reply

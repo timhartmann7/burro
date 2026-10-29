@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,6 +54,8 @@ type Config struct {
 	pipelines map[string][]string
 	steps     map[string]Step
 	drop      []*regexp.Regexp
+	// secrets maps a secret name to the local file that holds it.
+	secrets map[string]string
 }
 
 // Step is one validated step of burro.toml.
@@ -63,6 +66,10 @@ type Step struct {
 	Timeout         time.Duration
 	ContinueOnFail  bool
 	SkipIfUnchanged []string
+	// JUnit is a slash-separated path or glob inside the project, empty
+	// without a report.
+	JUnit   string
+	Secrets []string
 }
 
 // Selected is one pipeline step of a run. Skip says why the step stays out
@@ -96,7 +103,7 @@ func Parse(data []byte, repo string) (*Config, error) {
 		return nil, syntaxError(err)
 	}
 	top := table{raw: raw}
-	if err := top.only("host", "path", "pipelines", "steps", "filters"); err != nil {
+	if err := top.only("host", "path", "pipelines", "steps", "filters", "secrets"); err != nil {
 		return nil, err
 	}
 
@@ -131,6 +138,9 @@ func Parse(data []byte, repo string) (*Config, error) {
 	if c.drop, err = parseFilters(top); err != nil {
 		return nil, err
 	}
+	if c.secrets, err = parseSecrets(top, c.steps); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -163,7 +173,7 @@ func parseSteps(top table) (map[string]Step, error) {
 
 func parseStep(name string, t table) (Step, error) {
 	s := Step{Name: name}
-	if err := t.only("run", "env", "timeout", "continue_on_fail", "skip_if_unchanged"); err != nil {
+	if err := t.only("run", "env", "timeout", "continue_on_fail", "skip_if_unchanged", "junit", "secrets"); err != nil {
 		return s, err
 	}
 	var err error
@@ -190,8 +200,73 @@ func parseStep(name string, t table) (Step, error) {
 				fmt.Sprintf("list files in %s relative to the project root, without .. parts", t.key("skip_if_unchanged")))
 		}
 	}
+	if s.JUnit, err = parseJUnit(t); err != nil {
+		return s, err
+	}
+	if s.Secrets, err = t.list("secrets", "npmrc"); err != nil {
+		return s, err
+	}
 	s.Env, err = parseEnv(t)
 	return s, err
+}
+
+// parseJUnit reads the report glob of a step. It stays inside the project,
+// so the runner can open its matches through os.Root.
+func parseJUnit(t table) (string, error) {
+	junit, err := t.str("junit", "", ".burro/out/unit.xml")
+	if err != nil || junit == "" {
+		return "", err
+	}
+	clean := filepath.ToSlash(filepath.Clean(junit))
+	_, badPattern := filepath.Match(clean, "")
+	if !filepath.IsLocal(junit) || !fs.ValidPath(clean) || badPattern != nil {
+		return "", output.NewError(output.ExitUsage,
+			fmt.Sprintf("%s: %s %q is not a path or glob inside the project", File, t.key("junit"), junit),
+			fmt.Sprintf(`set %s relative to the project root, for example junit = "target/surefire-reports/*.xml"`, t.key("junit")))
+	}
+	return clean, nil
+}
+
+// parseSecrets reads [secrets] and checks that every secret a step names
+// is there.
+func parseSecrets(top table, steps map[string]Step) (map[string]string, error) {
+	secrets, err := parseSecretFiles(top)
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range slices.Sorted(maps.Keys(steps)) {
+		for _, name := range steps[step].Secrets {
+			if _, ok := secrets[name]; !ok {
+				return nil, output.NewError(output.ExitUsage,
+					fmt.Sprintf("%s: steps.%s.secrets: unknown secret %q", File, tomlKey(step), name),
+					fmt.Sprintf("add %s = \"<local file>\" under [secrets] or remove %q from steps.%s.secrets", tomlKey(name), name, tomlKey(step)))
+			}
+		}
+	}
+	return secrets, nil
+}
+
+func parseSecretFiles(top table) (map[string]string, error) {
+	secrets := map[string]string{}
+	t, ok, err := top.sub("secrets")
+	if err != nil || !ok {
+		return secrets, err
+	}
+	for _, name := range t.keys() {
+		if err := ValidName("secret", name); err != nil {
+			return nil, fmt.Errorf("%s: secrets: %w", File, err)
+		}
+		file, err := t.str(name, "", "~/.npmrc")
+		if err != nil {
+			return nil, err
+		}
+		if file == "" {
+			return nil, output.NewError(output.ExitUsage, fmt.Sprintf("%s: %s is empty", File, t.key(name)),
+				fmt.Sprintf(`set %s to a local file, for example %s = "~/.npmrc"`, t.key(name), name))
+		}
+		secrets[name] = file
+	}
+	return secrets, nil
 }
 
 func parseTimeout(t table) (time.Duration, error) {
@@ -512,6 +587,52 @@ func (c *Config) Select(pipeline, from string, only []string) ([]Selected, error
 	return selected, nil
 }
 
+// Secrets reads the local files of the secrets that the running steps of
+// selected need. root is the project root that relative paths start from,
+// home the folder ~/ stands for. A missing file is exit 4, before anything
+// reaches the server.
+func (c *Config) Secrets(selected []Selected, root, home string) (map[string][]byte, error) {
+	values := map[string][]byte{}
+	for i := range selected {
+		if selected[i].Skip != "" {
+			continue
+		}
+		for _, name := range selected[i].Step.Secrets {
+			if _, done := values[name]; done {
+				continue
+			}
+			data, err := os.ReadFile(c.secretFile(name, root, home))
+			if err != nil {
+				return nil, c.secretError(name, err)
+			}
+			values[name] = data
+		}
+	}
+	return values, nil
+}
+
+func (c *Config) secretFile(name, root, home string) string {
+	file := c.secrets[name]
+	switch {
+	case strings.HasPrefix(file, homePrefix):
+		return filepath.Join(home, file[len(homePrefix):])
+	case filepath.IsAbs(file):
+		return filepath.Clean(file)
+	default:
+		return filepath.Join(root, file)
+	}
+}
+
+func (c *Config) secretError(name string, err error) error {
+	file := c.secrets[name]
+	if errors.Is(err, fs.ErrNotExist) {
+		return output.NewError(output.ExitUsage, fmt.Sprintf("secret %s: %s does not exist", name, file),
+			fmt.Sprintf("create %s, or point secrets.%s in %s to the file that holds it", file, name, File))
+	}
+	return output.NewError(output.ExitUsage, fmt.Sprintf("secret %s: read %s: %v", name, file, errors.Unwrap(err)),
+		fmt.Sprintf("make %s readable", file))
+}
+
 // ValidRun checks a run id such as r42. It ends up in file paths on the
 // server.
 func ValidRun(id string) error {
@@ -533,16 +654,9 @@ func ValidName(field, name string) error {
 		"use lowercase letters, digits, - and _, up to 63 characters, starting with a letter or digit")
 }
 
-// ReadInRoot reads the file at name, relative to dir unless absolute, and
-// fails unless it resolves inside root. Symlinks that point outside fail too.
-func ReadInRoot(root, dir, name string) ([]byte, error) {
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("open project root: %v", err),
-			"run burro inside the project's git repository")
-	}
-	defer func() { _ = r.Close() }()
-
+// InRoot returns name, relative to dir unless absolute, as a path relative
+// to root, and whether it stays inside root.
+func InRoot(root, dir, name string) (string, bool) {
 	// The working folder may sit behind a symlink such as /tmp on macOS, while
 	// git reports the resolved root.
 	resolved, err := filepath.EvalSymlinks(dir)
@@ -555,6 +669,23 @@ func ReadInRoot(root, dir, name string) ([]byte, error) {
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
+}
+
+// ReadInRoot reads the file at name, relative to dir unless absolute, and
+// fails unless it resolves inside root. Symlinks that point outside fail too.
+func ReadInRoot(root, dir, name string) ([]byte, error) {
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("open project root: %v", err),
+			"run burro inside the project's git repository")
+	}
+	defer func() { _ = r.Close() }()
+
+	rel, ok := InRoot(root, dir, name)
+	if !ok {
 		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("%s: not inside the project folder %s", name, root),
 			"move the script into the project folder")
 	}

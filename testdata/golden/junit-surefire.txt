@@ -1,0 +1,7 @@
+total 4 · failed 2 · skipped 1
+com.example.CalcTest:0  parsesConfig
+  message: For input string: "config is broken"
+  frame: Calc.java:9
+com.example.CalcTest:0  divides
+  message: expected: <3> but was: <2>
+  frame: CalcTest.java:16

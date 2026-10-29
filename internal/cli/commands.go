@@ -228,10 +228,9 @@ func diskCheck(dfLine, home string) output.Check {
 }
 
 func (a *App) exec(ctx context.Context, p *parsed) error {
-	maxLines, err := strconv.Atoi(p.flags["max-lines"])
-	if err != nil || maxLines < 1 {
-		return output.NewError(output.ExitUsage, fmt.Sprintf("exec: --max-lines %q is not a positive number", p.flags["max-lines"]),
-			"pass a number of lines, for example --max-lines 100")
+	maxLines, err := positive(p, "exec", "max-lines")
+	if err != nil {
+		return err
 	}
 	file := p.flags["file"]
 	if file == "" && len(p.args) == 0 {

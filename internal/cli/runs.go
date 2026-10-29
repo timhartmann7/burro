@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +25,10 @@ import (
 // again.
 const waitCall = 4 * time.Minute
 
+// cleanTimeout bounds clean, which waits for docker to remove what the run
+// left.
+const cleanTimeout = 3 * time.Minute
+
 // erase returns to the start of the line and clears it.
 const erase = "\r\x1b[K"
 
@@ -31,6 +37,9 @@ const defaultContext = "5"
 
 // cmdLog names the log command and its executor call.
 const cmdLog = "log"
+
+// defaultMaxLines is how many lines the summary of wait and failures takes.
+const defaultMaxLines = 40
 
 // pauses are the waits between reconnects after ssh breaks during wait.
 func pauses() []time.Duration {
@@ -52,8 +61,23 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	if _, err := proj.cfg.Select(pipeline, from, onlyList); err != nil {
+	selected, err := proj.cfg.Select(pipeline, from, onlyList)
+	if err != nil {
 		return err
+	}
+	// Secrets are read before anything reaches the server, so a missing
+	// one costs nothing there.
+	secrets, err := proj.cfg.Secrets(selected, proj.repo.Root(), a.getenv("HOME"))
+	if err != nil {
+		return err
+	}
+	var stdin io.Reader
+	if len(secrets) > 0 {
+		data, err := json.Marshal(secrets)
+		if err != nil {
+			return fmt.Errorf("encode secrets: %w", err)
+		}
+		stdin = bytes.NewReader(data)
 	}
 	synced, err := a.push(ctx, proj)
 	if err != nil {
@@ -66,7 +90,9 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if hasOnly {
 		args = append(args, "--only", only)
 	}
-	reply, err := a.short(ctx, proj.host, append(args, pipeline)...)
+	startCtx, cancel := context.WithTimeout(ctx, shortTimeout)
+	defer cancel()
+	reply, err := a.call(startCtx, proj.host, stdin, append(args, pipeline)...)
 	if err != nil {
 		return err
 	}
@@ -159,7 +185,7 @@ func (a *App) wait(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	if err := p.print.Summary(sum); err != nil {
+	if err := p.print.Summary(sum, defaultMaxLines); err != nil {
 		return err
 	}
 	return exitOf(sum)
@@ -301,7 +327,7 @@ func (a *App) status(ctx context.Context, p *parsed) error {
 	if local != reply.Tree {
 		reply.Summary.Local = local[:tree.ShortLen]
 	}
-	if err := p.print.Summary(reply.Summary); err != nil {
+	if err := p.print.Summary(reply.Summary, 0); err != nil {
 		return err
 	}
 	return exitOf(reply.Summary)
@@ -326,9 +352,8 @@ func parseLog(p *parsed) (*logRequest, error) {
 	if err := config.ValidName("step", r.step); err != nil {
 		return nil, err
 	}
-	if r.tail, err = strconv.Atoi(p.flags["tail"]); err != nil || r.tail < 1 {
-		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("log: --tail %q is not a positive number", p.flags["tail"]),
-			"pass a number of lines, for example --tail 100")
+	if r.tail, err = positive(p, cmdLog, "tail"); err != nil {
+		return nil, err
 	}
 	if lines, err := strconv.Atoi(p.flags["context"]); err != nil || lines < 0 {
 		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("log: --context %q is not a number of lines", p.flags["context"]),
@@ -392,5 +417,62 @@ func (a *App) cancel(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	return p.print.Summary(reply.Summary)
+	return p.print.Summary(reply.Summary, 0)
+}
+
+func (a *App) failures(ctx context.Context, p *parsed) error {
+	id, err := runID(p.args)
+	if err != nil {
+		return err
+	}
+	maxLines, err := positive(p, "failures", "max-lines")
+	if err != nil {
+		return err
+	}
+	proj, err := a.project(ctx)
+	if err != nil {
+		return err
+	}
+	reply, err := a.summaryCall(ctx, proj, "failures", id)
+	if err != nil {
+		return err
+	}
+	if err := p.print.Summary(reply.Summary, maxLines); err != nil {
+		return err
+	}
+	return exitOf(reply.Summary)
+}
+
+func (a *App) clean(ctx context.Context, p *parsed) error {
+	id, err := runID(p.args)
+	if err != nil {
+		return err
+	}
+	proj, err := a.project(ctx)
+	if err != nil {
+		return err
+	}
+	if err := a.connect(ctx, proj.host); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, cleanTimeout)
+	defer cancel()
+	reply, err := a.call(ctx, proj.host, nil, withID(proj.call("clean"), id)...)
+	if err != nil {
+		return err
+	}
+	if reply.Cleaned == nil {
+		return noResult(proj.host, "clean")
+	}
+	return p.print.Cleaned(reply.Cleaned)
+}
+
+// positive reads flag of cmd as a number of lines above 0.
+func positive(p *parsed, cmd, flag string) (int, error) {
+	n, err := strconv.Atoi(p.flags[flag])
+	if err != nil || n < 1 {
+		return 0, output.NewError(output.ExitUsage, fmt.Sprintf("%s: --%s %q is not a positive number", cmd, flag, p.flags[flag]),
+			fmt.Sprintf("pass a number of lines, for example --%s 100", flag))
+	}
+	return n, nil
 }

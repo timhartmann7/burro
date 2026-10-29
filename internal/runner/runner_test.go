@@ -443,3 +443,108 @@ func TestExec(t *testing.T) {
 		t.Fatal("a missing folder passed")
 	}
 }
+
+const secretValue = "hunter2-correct-horse"
+
+// withSecret writes the secret token of req, the way the executor does.
+func withSecret(t *testing.T, req request) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(req.secrets, "token"), []byte(secretValue+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// acceptance: S3-09 S3-10
+func TestSecretsMaskedAndRemoved(t *testing.T) {
+	p := newProject(t, `
+[pipelines]
+default = ["leak", "after"]
+
+[steps.leak]
+run = '''cat "$BURRO_SECRETS/token"; v=$(cat "$BURRO_SECRETS/token"); for i in $(seq 1 2000); do printf 'line %d\n' $i; done; printf '%s' "$v" | fold -w 3; echo; echo "[$v]" >&2'''
+
+[steps.after]
+run = "ls \"$BURRO_SECRETS\""
+`)
+	req := p.prepare([]string{"leak", "after"}, nil)
+	withSecret(t, req)
+	s := p.run(context.Background(), testRunner(), req)
+	if states(s) != "leak:ok after:ok" {
+		t.Fatalf("got %s", states(s))
+	}
+	leak := p.log(req.id, "leak")
+	if strings.Contains(leak, secretValue) || !strings.HasPrefix(leak, report.Mask+"\nline 1\n") || !strings.HasSuffix(leak, "["+report.Mask+"]\n") {
+		t.Fatalf("leak log starts %q ends %q", leak[:40], leak[len(leak)-60:])
+	}
+	if got := p.log(req.id, "after"); got != "token\n" {
+		t.Fatalf("after log %q", got)
+	}
+	if _, err := os.Stat(req.secrets); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("secrets folder left: %v", err)
+	}
+}
+
+// A process the step left running keeps the masked pipe open; the run ends
+// anyway.
+func TestLeftoverHoldsMaskedOutput(t *testing.T) {
+	mark := marker(t)
+	p := newProject(t, fmt.Sprintf("[pipelines]\ndefault = [\"a\"]\n[steps.a]\nrun = \"(sleep %s; echo late) & echo early\"\n", mark))
+	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "pkill", "-f", "sleep "+mark).Run() })
+	req := p.prepare([]string{stepA}, nil)
+	withSecret(t, req)
+	start := time.Now()
+	s := p.run(context.Background(), testRunner(), req)
+	if took := time.Since(start); took > 10*time.Second || states(s) != "a:ok" || p.log(req.id, stepA) != "early\n" {
+		t.Fatalf("took %s: %s %q", took, states(s), p.log(req.id, stepA))
+	}
+}
+
+func TestReportsCopied(t *testing.T) {
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "testdata", "junit", "gotestsum.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newProject(t, fmt.Sprintf(`
+[pipelines]
+default = ["unit", "plain"]
+
+[steps.unit]
+run = 'mkdir -p .burro/out && cp "%s" .burro/out/unit.xml && exit 1'
+junit = ".burro/out/*.xml"
+continue_on_fail = true
+
+[steps.plain]
+run = "true"
+`, fixture))
+	req := p.prepare([]string{"unit", "plain"}, nil)
+	p.run(context.Background(), testRunner(), req)
+	copies, err := filepath.Glob(filepath.Join(p.proj.RunDir(req.id), "junit", "*", "*"))
+	if err != nil || len(copies) != 1 || !strings.HasSuffix(copies[0], "/junit/unit/1.xml") {
+		t.Fatalf("copies %v, %v", copies, err)
+	}
+}
+
+func TestCleanWithoutDocker(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	secrets := filepath.Join(t.TempDir(), "burro-1a2b3c4d-r1")
+	if err := os.Mkdir(secrets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, false} {
+		c, err := Clean(context.Background(), "burro-1a2b3c4d-r1", secrets)
+		if err != nil || *c != (output.Cleaned{Secrets: want}) {
+			t.Fatalf("got %+v, %v; want secrets %v", c, err, want)
+		}
+	}
+}
+
+func TestExecLeftover(t *testing.T) {
+	mark := marker(t)
+	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "pkill", "-f", "sleep "+mark).Run() })
+	var out strings.Builder
+	start := time.Now()
+	code, err := Exec(context.Background(), t.TempDir(), "sleep "+mark+" & echo started", nil, &out)
+	if err != nil || code != 0 || out.String() != "started\n" || time.Since(start) > 10*time.Second {
+		t.Fatalf("code %d out %q err %v after %s", code, out.String(), err, time.Since(start))
+	}
+}

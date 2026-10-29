@@ -1,1 +1,1 @@
-{"run":"r7","pipeline":"default","tree":"5530df9","state":"done","exit":2,"seconds":75,"reason":"runner died","steps":[{"name":"test","state":"fail","seconds":70,"detail":"runner died","more":"burro log r7 --step test"}]}
+{"run":"r7","pipeline":"default","tree":"5530df9","state":"done","exit":2,"seconds":75,"reason":"runner died","steps":[{"name":"test","state":"fail","seconds":70,"detail":"runner died","more":"burro log r7 --step test"}],"failures":[],"hidden":0}

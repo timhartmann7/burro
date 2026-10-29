@@ -1,0 +1,3 @@
+created    burro.toml
+updated    CLAUDE.md    rules for your agent
+updated    .gitignore   .burro/

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/report"
 )
 
 const (
@@ -47,6 +48,7 @@ type Reply struct {
 	Summary  *output.Summary  `json:"summary,omitempty"`
 	Log      *output.Log      `json:"log,omitempty"`
 	Progress *output.Progress `json:"progress,omitempty"`
+	Cleaned  *output.Cleaned  `json:"cleaned,omitempty"`
 	// Tree is the full tree hash of the run; the summary shows it short.
 	Tree string `json:"tree,omitempty"`
 }
@@ -64,6 +66,11 @@ type Failure struct {
 // in because the executor may not import the runner.
 type Shell func(ctx context.Context, dir, script string, args []string, out io.Writer) (int, error)
 
+// Clean removes the docker leftovers and the secrets folder of the run with
+// key. runner.Clean is the one implementation; the runner cleans up the
+// same way at the end of every run.
+type Clean func(ctx context.Context, key, secrets string) (*output.Cleaned, error)
+
 // Executor runs agent calls on the server.
 type Executor struct {
 	stdin   io.Reader
@@ -72,14 +79,15 @@ type Executor struct {
 	runner  []string
 	secrets string
 	shell   Shell
+	clean   Clean
 }
 
-// New returns an executor that reads scripts from stdin, writes its reply to
-// stdout and resolves relative project paths against home. runner is the
-// command line that starts a runner, secrets the tmpfs folder that holds the
-// secrets folder of each run.
-func New(stdin io.Reader, stdout io.Writer, home string, runner []string, secrets string, shell Shell) *Executor {
-	return &Executor{stdin: stdin, stdout: stdout, home: home, runner: runner, secrets: secrets, shell: shell}
+// New returns an executor that reads scripts and secrets from stdin,
+// writes its reply to stdout and resolves relative project paths against
+// home. runner is the command line that starts a runner, secrets the tmpfs
+// folder that holds the secrets folder of each run.
+func New(stdin io.Reader, stdout io.Writer, home string, runner []string, secrets string, shell Shell, clean Clean) *Executor {
+	return &Executor{stdin: stdin, stdout: stdout, home: home, runner: runner, secrets: secrets, shell: shell, clean: clean}
 }
 
 // Run handles one agent call. Failures go into the reply; only a reply that
@@ -109,6 +117,10 @@ func (e *Executor) dispatch(action string, args []string) (*Reply, error) {
 		reply.Summary, reply.Tree, err = e.status(args)
 	case "wait":
 		reply.Summary, err = e.wait(args)
+	case "failures":
+		reply.Summary, err = e.failures(args)
+	case "clean":
+		reply.Cleaned, err = e.cleanRun(args)
 	case "log":
 		reply.Log, err = e.log(args)
 	case "cancel":
@@ -216,8 +228,19 @@ func (e *Executor) exec(args []string) (*output.Exec, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	defer cancel()
-	code, err := e.shell(ctx, dir, `exec "$@"`, argv, log)
+	// A command may print the secrets of a run going on in the project.
+	// Without any, the log stays a plain file the command writes itself.
+	secrets := e.liveSecrets(dir)
+	masked := report.NewMasker(log, secrets)
+	var out io.Writer = log
+	if len(secrets) > 0 {
+		out = masked
+	}
+	code, err := e.shell(ctx, dir, `exec "$@"`, argv, out)
 	if err != nil {
+		return nil, err
+	}
+	if err := masked.Flush(); err != nil {
 		return nil, err
 	}
 	if err := prune(logs, n); err != nil {
@@ -231,6 +254,13 @@ func (e *Executor) exec(args []string) (*output.Exec, error) {
 		return nil, err
 	}
 	return &output.Exec{Output: head, Hidden: hidden, Log: fmt.Sprintf("%s/e%d.log", logFolder, n), Exit: code}, nil
+}
+
+// liveSecrets reads the secrets of the project's runs. Only a live run
+// keeps its folder, so these are the values exec output may hold.
+func (e *Executor) liveSecrets(dir string) [][]byte {
+	folders, _ := filepath.Glob(filepath.Join(e.secrets, report.Open(dir).KeyPrefix()+"*"))
+	return report.ReadSecrets(folders...)
 }
 
 // nextLog creates e<n>.log with n one above the highest present. O_EXCL

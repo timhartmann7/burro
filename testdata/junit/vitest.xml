@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="4" failures="2" errors="0" time="0.004991741">
+    <testsuite name="vitest/calc.test.mjs" timestamp="2026-10-29T16:06:04.656Z" hostname="8678cc176c0d" tests="4" failures="2" errors="0" skipped="1" time="0.004991741">
+        <testcase classname="vitest/calc.test.mjs" name="calc &gt; adds numbers" time="0.000944589">
+        </testcase>
+        <testcase classname="vitest/calc.test.mjs" name="calc &gt; divides numbers" time="0.003107104">
+            <failure message="expected 2 to be 3 // Object.is equality" type="AssertionError">
+AssertionError: expected 2 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 2
+
+ ❯ vitest/calc.test.mjs:10:19
+            </failure>
+        </testcase>
+        <testcase classname="vitest/calc.test.mjs" name="calc &gt; parses the config" time="0.000306918">
+            <failure message="config is broken" type="TypeError">
+TypeError: config is broken
+ ❯ Object.explode node_modules/badlib/index.js:2:9
+ ❯ vitest/calc.test.mjs:14:12
+            </failure>
+        </testcase>
+        <testcase classname="vitest/calc.test.mjs" name="calc &gt; multiplies numbers" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

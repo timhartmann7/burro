@@ -236,6 +236,23 @@ func (a *App) registry() []command {
 			run: a.hostAdd,
 		},
 		{
+			name:    "init",
+			summary: "set up this project and the agent rules",
+			group:   groupSetup,
+			about:   "create burro.toml, write the agent rules block, ignore .burro/",
+			usage:   []string{"init [--agents-file path] [--print]"},
+			flags: []flagSpec{
+				{name: "agents-file", arg: "path", usage: "write the rules here, not into AGENTS.md or CLAUDE.md"},
+				{name: "print", usage: "print the rules block and write nothing"},
+			},
+			example: "burro init --agents-file docs/AGENTS.md",
+			exits: []exitLabel{
+				{output.ExitPassed, "set up"},
+				{output.ExitUsage, "not a git repository or bad flags"},
+			},
+			run: a.initProject,
+		},
+		{
 			name:    "run",
 			brief:   "run [pipeline]",
 			summary: "sync the code and start a run, returns at once",
@@ -280,6 +297,20 @@ func (a *App) registry() []command {
 			example: "burro status r42",
 			exits:   runExits("still running"),
 			run:     a.status,
+		},
+		{
+			name:    "failures",
+			summary: "what failed and where",
+			group:   groupRun,
+			about:   "show what failed, where, and whether it is NEW or SEEN",
+			usage:   []string{"failures [id] [--max-lines 40]"},
+			flags: []flagSpec{
+				{name: "max-lines", arg: "n", def: "40", usage: "most lines to print, the last says what is left"},
+			},
+			maxArgs: 1,
+			example: "burro failures r42 --max-lines 100",
+			exits:   runExits("still running"),
+			run:     a.failures,
 		},
 		{
 			name:    cmdLog,
@@ -379,6 +410,22 @@ func (a *App) registry() []command {
 				{output.ExitServer, "hosts file unreadable"},
 			},
 			run: a.hostList,
+		},
+		{
+			name:    "clean",
+			summary: "remove a run's docker leftovers and secrets",
+			group:   groupServer,
+			about:   "remove a run's docker containers, networks, volumes and secrets",
+			usage:   []string{"clean [id]"},
+			maxArgs: 1,
+			example: "burro clean r42",
+			exits: []exitLabel{
+				{output.ExitPassed, "removed"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "unknown run"},
+				{output.ExitBusy, "the run is still active"},
+			},
+			run: a.clean,
 		},
 	}
 }

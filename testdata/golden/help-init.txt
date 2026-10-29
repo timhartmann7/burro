@@ -1,0 +1,11 @@
+burro init · create burro.toml, write the agent rules block, ignore .burro/
+
+Usage: burro init [--agents-file path] [--print]
+
+  --agents-file path    write the rules here, not into AGENTS.md or CLAUDE.md
+  --print               print the rules block and write nothing
+
+Example
+  burro init --agents-file docs/AGENTS.md
+
+Exit codes  0 set up · 4 not a git repository or bad flags

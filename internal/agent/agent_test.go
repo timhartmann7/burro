@@ -28,7 +28,7 @@ func project(t *testing.T) (home, dir string) {
 func call(t *testing.T, home, stdin string, args ...string) agent.Reply {
 	t.Helper()
 	var out strings.Builder
-	if err := agent.New(strings.NewReader(stdin), &out, home, nil, "", runner.Exec).Run(args); err != nil {
+	if err := agent.New(strings.NewReader(stdin), &out, home, nil, "", runner.Exec, runner.Clean).Run(args); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(out.String(), "\n") != 1 {
@@ -219,7 +219,7 @@ func TestExecFailures(t *testing.T) {
 }
 
 func TestReplyWriteError(t *testing.T) {
-	err := agent.New(strings.NewReader(""), brokenWriter{}, t.TempDir(), nil, "", runner.Exec).Run(nil)
+	err := agent.New(strings.NewReader(""), brokenWriter{}, t.TempDir(), nil, "", runner.Exec, runner.Clean).Run(nil)
 	if err == nil || !strings.Contains(err.Error(), "broken pipe") {
 		t.Fatalf("got %v", err)
 	}

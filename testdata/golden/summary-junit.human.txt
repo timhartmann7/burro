@@ -1,0 +1,15 @@
+r42 verify · tree 5530df9 · 41m · exit 1
+install     [90mskip[0m  pnpm-lock.yaml unchanged
+unit        [32mok[0m    2081/2081  3m10s
+e2e         [31mFAIL[0m  152/155  22m
+  [31mNEW[0m   tests/site.spec.ts:252  cohorts are listed  x3
+        strict mode violation: locator('#school [data-cohort]') resolved to 2 elements
+        at tests/site.spec.ts:257
+  [90mSEEN[0m  tests/roles.spec.ts  creates roles
+        hook timed out after 120000ms
+api         [31mFAIL[0m  30s
+  report unreadable
+  Segmentation fault
+more: burro log r42 --step api
+lighthouse  [32mok[0m    14m
+more: burro log r42 --step e2e --grep cohorts

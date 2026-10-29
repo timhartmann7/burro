@@ -144,7 +144,7 @@ func (a *App) agent(args []string) error {
 		return fmt.Errorf("find the server binary: %w", err)
 	}
 	runnerCmd := []string{self, agentCommand, agent.RunnerCall}
-	return agent.New(a.stdin, a.stdout, a.getenv("HOME"), runnerCmd, shmRoot, runner.Exec).Run(args)
+	return agent.New(a.stdin, a.stdout, a.getenv("HOME"), runnerCmd, shmRoot, runner.Exec, runner.Clean).Run(args)
 }
 
 // find returns the command whose words start args, and the arguments after

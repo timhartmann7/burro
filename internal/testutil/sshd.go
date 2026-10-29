@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,19 @@ type Server struct {
 // known_hosts and a config entry for it. The container stops when the test
 // ends. Without Docker the test skips, or fails when CI=true.
 func StartServer(tb testing.TB) *Server {
+	tb.Helper()
+	return startServer(tb)
+}
+
+// StartDockerServer is StartServer with the host's docker socket in the
+// container, so docker and docker compose on the server reach a real
+// daemon.
+func StartDockerServer(tb testing.TB) *Server {
+	tb.Helper()
+	return startServer(tb, "--volume", "/var/run/docker.sock:/var/run/docker.sock")
+}
+
+func startServer(tb testing.TB, runArgs ...string) *Server {
 	tb.Helper()
 	requireDocker(tb)
 	image := mustRun(tb, "docker", "build", "--quiet", filepath.Join(moduleRoot(tb), "test", "sshd"))
@@ -65,12 +79,14 @@ func StartServer(tb testing.TB) *Server {
 	}
 
 	s := &Server{
-		container: mustRun(tb, "docker", "run", "--detach", "--rm",
+		container: mustRun(tb, "docker", slices.Concat([]string{
+			"run", "--detach", "--rm",
 			"--cap-add", "NET_ADMIN",
 			"--publish", "127.0.0.1::22",
 			"--label", sshHost,
-			"--env", "AUTHORIZED_KEY="+strings.TrimSpace(string(pub)),
-			image),
+			"--env", "AUTHORIZED_KEY=" + strings.TrimSpace(string(pub)),
+		},
+			runArgs, []string{image})...),
 		home:       home,
 		config:     filepath.Join(sshDir, "config"),
 		controlDir: controlDir,

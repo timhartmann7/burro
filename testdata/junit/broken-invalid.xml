@@ -1,0 +1,5 @@
+<testsuites>
+  <testsuite name="unit">
+    <testcase name="a"><failure message="x"></testcase>
+  </testsuite>
+</testsuites>

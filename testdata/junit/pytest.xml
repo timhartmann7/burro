@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="1" failures="2" skipped="1" tests="5" time="0.012" timestamp="2026-10-29T15:59:25.228869+00:00" hostname="7e727c8b1983"><testcase classname="tests.test_calc" name="test_adds" time="0.000" /><testcase classname="tests.test_calc" name="test_divides" time="0.000"><failure message="assert 2.0 == 3">def test_divides():
+        result = 6 / 3
+&gt;       assert result == 3
+E       assert 2.0 == 3
+
+tests/test_calc.py:11: AssertionError</failure></testcase><testcase classname="tests.test_calc" name="test_parses_config" time="0.000"><failure message="ValueError: config is broken">def test_parses_config():
+&gt;       badlib.explode("config is broken")
+
+tests/test_calc.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+what = 'config is broken'
+
+    def explode(what):
+&gt;       raise ValueError(what)
+E       ValueError: config is broken
+
+.venv/lib/python3.13/site-packages/badlib.py:2: ValueError</failure></testcase><testcase classname="tests.test_calc" name="test_multiplies" time="0.000"><skipped type="pytest.skip" message="not ready">/app/tests/test_calc.py:18: not ready</skipped></testcase><testcase classname="tests.test_calc" name="test_reads_rows" time="0.000"><error message="failed on setup with &quot;RuntimeError: database is down&quot;">@pytest.fixture
+    def database():
+&gt;       raise RuntimeError("database is down")
+E       RuntimeError: database is down
+
+tests/test_calc.py:25: RuntimeError</error></testcase></testsuite></testsuites>

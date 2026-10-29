@@ -39,7 +39,12 @@ type world struct {
 
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
-	srv := testutil.StartServer(t)
+	return newWorldOn(t, testutil.StartServer(t), files)
+}
+
+// newWorldOn is newWorld on the server srv.
+func newWorldOn(t *testing.T, srv *testutil.Server, files map[string]string) *world {
+	t.Helper()
 	all := map[string]string{tomlFile: hostTOML}
 	for k, v := range files {
 		all[k] = v
@@ -122,16 +127,6 @@ func (w *world) closeMasters() {
 	sockets, _ := filepath.Glob(filepath.Join(w.srv.Home(), ".burro", "cm", "*"))
 	for _, socket := range sockets {
 		_ = exec.CommandContext(context.Background(), "ssh", "-o", "ControlPath="+socket, "-O", "exit", "x").Run()
-	}
-}
-
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }
 

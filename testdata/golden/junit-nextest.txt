@@ -1,0 +1,7 @@
+total 3 · failed 2 · skipped 0
+calc:0  tests::parses_config
+  message: Error: "config is broken: invalid digit found in string"
+  frame: 
+calc:0  tests::divides
+  message: assertion `left == right` failed
+  frame: src/lib.rs:20

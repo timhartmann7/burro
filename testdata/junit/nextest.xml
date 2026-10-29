@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="3" skipped="0" failures="2" errors="0" uuid="0f9a20ba-9f89-4438-a4fc-a4c59f5d0832" timestamp="2026-10-29T16:03:20.190+00:00" time="0.002">
+    <testsuite name="calc" tests="3" skipped="0" errors="0" failures="2">
+        <testcase name="tests::parses_config" classname="calc" timestamp="2026-10-29T16:03:20.190+00:00" time="0.001">
+            <failure message="Error: &quot;config is broken: invalid digit found in string&quot;" type="test failure with exit code 101">Error: &quot;config is broken: invalid digit found in string&quot;</failure>
+            <system-out>
+running 1 test
+test tests::parses_config ... FAILED
+
+failures:
+
+failures:
+    tests::parses_config
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+</system-out>
+            <system-err>Error: &quot;config is broken: invalid digit found in string&quot;
+</system-err>
+        </testcase>
+        <testcase name="tests::adds" classname="calc" timestamp="2026-10-29T16:03:20.191+00:00" time="0.002"/>
+        <testcase name="tests::divides" classname="calc" timestamp="2026-10-29T16:03:20.191+00:00" time="0.002">
+            <failure message="thread &apos;tests::divides&apos; panicked at src/lib.rs:20:9" type="test failure with exit code 101">thread &apos;tests::divides&apos; panicked at src/lib.rs:20:9:
+assertion `left == right` failed
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace</failure>
+            <system-out>
+running 1 test
+test tests::divides ... FAILED
+
+failures:
+
+failures:
+    tests::divides
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+</system-out>
+            <system-err>
+thread &apos;tests::divides&apos; panicked at src/lib.rs:20:9:
+assertion `left == right` failed
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</system-err>
+        </testcase>
+    </testsuite>
+</testsuites>
