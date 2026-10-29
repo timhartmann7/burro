@@ -10,7 +10,10 @@ import (
 	"github.com/timhartmann7/burro/internal/testutil"
 )
 
-// acceptance: S1-18
+// steps is the pipeline part of a valid burro.toml.
+const steps = "\n[pipelines]\ndefault = [\"test\"]\n\n[steps.test]\nrun = \"true\"\n"
+
+// acceptance: S1-18 S2-16
 func TestBadConfigNeverTouchesNetwork(t *testing.T) {
 	bin := testutil.BuildBurro(t)
 	home := t.TempDir()
@@ -43,7 +46,11 @@ func TestBadConfigNeverTouchesNetwork(t *testing.T) {
 	}{
 		{name: "unknown key", toml: "host = \"vps1\"\ncontinue_on_fial = true\n", field: `"continue_on_fial"`},
 		{name: "bad host name", toml: "host = \"vps1; rm -rf ~\"\n", field: "host"},
-		{name: "host not added", toml: "host = \"vps2\"\n", field: "vps2"},
+		{name: "host not added", toml: "host = \"vps2\"\n" + steps, field: "vps2"},
+		{name: "unknown step in a pipeline", toml: "host = \"vps1\"\n[pipelines]\ndefault = [\"test\", \"e2e\"]\n[steps.test]\nrun = \"true\"\n", field: "pipelines.default"},
+		{name: "duplicate step in a pipeline", toml: "host = \"vps1\"\n[pipelines]\ndefault = [\"test\", \"test\"]\n[steps.test]\nrun = \"true\"\n", field: "pipelines.default"},
+		{name: "bad timeout", toml: "host = \"vps1\"\n[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"true\"\ntimeout = \"soon\"\n", field: "steps.test.timeout"},
+		{name: "invalid drop regex", toml: "host = \"vps1\"\n" + steps + "[filters]\ndrop = ['a(']\n", field: "filters.drop"},
 		{name: "path outside the allowed form", toml: "host = \"vps1\"\npath = \"~/../../etc\"\n", field: "path"},
 		{name: "relative path", toml: "host = \"vps1\"\npath = \"app\"\n", field: "path"},
 		{name: "broken TOML", toml: "host = [\n", field: "line"},
@@ -51,7 +58,12 @@ func TestBadConfigNeverTouchesNetwork(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := testutil.GitRepo(t, map[string]string{"burro.toml": tt.toml, "check.sh": "true\n"})
-			for _, args := range [][]string{{"sync"}, {"exec", "--", "true"}, {"exec", "--file", "check.sh"}, {"doctor"}} {
+			for _, args := range [][]string{
+				{"sync"},
+				{"exec", "--", "true"},
+				{"exec", "--file", "check.sh"},
+				{"doctor"},
+			} {
 				checkRefused(t, testutil.RunBurroIn(t, bin, repo, env, args...), tt.field)
 				if _, err := os.Stat(record); !errors.Is(err, os.ErrNotExist) {
 					calls, _ := os.ReadFile(record)

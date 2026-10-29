@@ -1,0 +1,22 @@
+host = "vps1"
+
+[pipelines]
+default = ["install", "unit"]
+verify  = ["install", "unit", "e2e"]
+
+[steps.install]
+run = "pnpm install"
+env = { CI = "true", X = "$BURRO_SECRETS/npmrc" }
+skip_if_unchanged = ["pnpm-lock.yaml"]
+
+[steps.unit]
+run = "pnpm test"
+continue_on_fail = true
+timeout = "20m"
+
+[steps.e2e]
+run = "pnpm e2e"
+timeout = "40m"
+
+[filters]
+drop = ['^\[pg-boss\]', '^\s*$']

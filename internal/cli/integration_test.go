@@ -22,7 +22,8 @@ const (
 	v1       = "1.0.0"
 	v2       = "1.0.1"
 	appDir   = "burro/app"
-	hostTOML = "host = \"vps1\"\npath = \"~/burro/app\"\n"
+	tomlHead = "host = \"vps1\"\npath = \"~/burro/app\"\n"
+	hostTOML = tomlHead + "\n[pipelines]\ndefault = [\"test\"]\n\n[steps.test]\nrun = \"true\"\n"
 )
 
 // world is one server, a client HOME that reaches it and a project repository

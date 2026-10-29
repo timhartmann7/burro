@@ -1,2 +1,8 @@
 host = "vps1"
 path = "~/burro/app"
+
+[pipelines]
+default = ["test"]
+
+[steps.test]
+run = "make test"

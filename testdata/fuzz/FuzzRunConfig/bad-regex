@@ -1,0 +1,7 @@
+host = "a"
+[pipelines]
+default = ["t"]
+[steps.t]
+run = "x"
+[filters]
+drop = ["(?P<x"]

@@ -6,18 +6,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/timhartmann7/burro/internal/config"
 	"github.com/timhartmann7/burro/internal/output"
 	"github.com/timhartmann7/burro/internal/testutil"
 )
 
+// minimal is the pipeline part every valid burro.toml needs.
+const minimal = "\n[pipelines]\ndefault = [\"test\"]\n\n[steps.test]\nrun = \"make test\"\n"
+
 const (
-	vps1      = "vps1"
-	fieldHost = "host"
-	fieldPath = "path"
-	echoOK    = "echo ok\n"
-	echoTop   = "echo top\n"
+	fieldTimeout = "steps.test.timeout"
+	fieldDrop    = "filters.drop"
+	fieldRun     = "steps.test.run"
+	fieldSkip    = "steps.test.skip_if_unchanged"
+	verify       = "verify"
+	install      = "install"
+	unit         = "unit"
+	e2e          = "e2e"
+	vps1         = "vps1"
+	fieldHost    = "host"
+	fieldPath    = "path"
+	echoOK       = "echo ok\n"
+	echoTop      = "echo top\n"
 )
 
 func TestParse(t *testing.T) {
@@ -36,7 +48,7 @@ func TestParse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := config.Parse([]byte(tt.toml), "myapp")
+			c, err := config.Parse([]byte(tt.toml+minimal), "myapp")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,7 +67,7 @@ func TestParseRejects(t *testing.T) {
 		field string
 	}{
 		{name: "unknown key", toml: "host = \"vps1\"\nhots = \"vps2\"", field: `"hots"`},
-		{name: "unknown table", toml: "host = \"vps1\"\n[steps.unit]\nrun = \"x\"", field: `"steps"`},
+		{name: "unknown table", toml: "host = \"vps1\"\n[stepz.unit]\nrun = \"x\"", field: `"stepz"`},
 		{name: "missing host", toml: `path = "~/x"`, field: fieldHost},
 		{name: "empty host", toml: `host = ""`, field: fieldHost},
 		{name: "upper case host", toml: `host = "VPS1"`, field: fieldHost},
@@ -102,7 +114,7 @@ func TestLoad(t *testing.T) {
 	if msg, _ := usageError(t, err); !strings.Contains(msg, "no burro.toml") {
 		t.Fatalf("missing file: %q", msg)
 	}
-	if err := os.WriteFile(filepath.Join(root, config.File), []byte("host = \"vps1\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, config.File), []byte("host = \"vps1\"\n"+minimal), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err := config.Load(root)
@@ -170,6 +182,238 @@ func TestReadInRoot(t *testing.T) {
 	}
 	if _, err := config.ReadInRoot(filepath.Join(root, "missing"), root, "top.sh"); err == nil {
 		t.Error("a missing root passed")
+	}
+}
+
+// full is a burro.toml with every field S2 knows.
+const full = `host = "vps1"
+
+[pipelines]
+default = ["install", "unit"]
+verify  = ["install", "unit", "e2e", "lighthouse"]
+
+[steps.install]
+run = "pnpm install --frozen-lockfile"
+env = { CI = "true", CACHE = "$BURRO_RUN/x" }
+skip_if_unchanged = ["pnpm-lock.yaml", "sub/dir/file"]
+
+[steps.unit]
+run = "pnpm vitest run"
+continue_on_fail = true
+timeout = "20m"
+
+[steps.e2e]
+run = "pnpm playwright test"
+timeout = "24h"
+
+[steps.lighthouse]
+run = "pnpm lhci autorun"
+timeout = "1s"
+
+[steps.unused]
+run = "true"
+
+[filters]
+drop = ['^\[pg-boss\]', '^\s*$']
+`
+
+func TestParseRun(t *testing.T) {
+	c, err := config.Parse([]byte(full), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Pipelines(); strings.Join(got, " ") != "default verify" {
+		t.Fatalf("pipelines %q", got)
+	}
+	inst, ok := c.Step(install)
+	if !ok || inst.Run != "pnpm install --frozen-lockfile" || inst.Timeout != time.Hour || inst.ContinueOnFail ||
+		inst.Env["CI"] != "true" || inst.Env["CACHE"] != "$BURRO_RUN/x" || strings.Join(inst.SkipIfUnchanged, " ") != "pnpm-lock.yaml sub/dir/file" {
+		t.Fatalf("install = %+v", inst)
+	}
+	if u, _ := c.Step(unit); !u.ContinueOnFail || u.Timeout != 20*time.Minute {
+		t.Fatalf("unit = %+v", u)
+	}
+	if st, _ := c.Step(e2e); st.Timeout != 24*time.Hour {
+		t.Fatalf("e2e = %+v", st)
+	}
+	if _, ok := c.Step("nope"); ok {
+		t.Fatal("unknown step found")
+	}
+	drop := c.Drop()
+	if len(drop) != 2 || !drop[0].MatchString("[pg-boss] tick") || !drop[1].MatchString("  ") || drop[1].MatchString("x") {
+		t.Fatalf("drop = %v", drop)
+	}
+	drop[0] = nil
+	if c.Drop()[0] == nil {
+		t.Fatal("Drop hands out the config's own slice")
+	}
+}
+
+// acceptance: S2-16
+func TestParseRunRejects(t *testing.T) {
+	const head = "host = \"vps1\"\n"
+	tests := []struct {
+		name  string
+		toml  string
+		field string
+	}{
+		{name: "no pipelines", toml: head + "[steps.test]\nrun = \"x\"", field: "pipelines"},
+		{name: "empty pipelines", toml: head + "[pipelines]\n[steps.test]\nrun = \"x\"", field: "pipelines"},
+		{name: "no steps", toml: head + "[pipelines]\ndefault = []", field: "steps"},
+		{name: "unknown step in a pipeline", toml: head + "[pipelines]\ndefault = [\"test\", \"e2e\"]\n[steps.test]\nrun = \"x\"", field: "pipelines.default"},
+		{name: "odd unknown step", toml: head + "[pipelines]\ndefault = [\"a b\"]\n[steps.test]\nrun = \"x\"", field: `[steps."a b"]`},
+		{name: "duplicate step in a pipeline", toml: head + "[pipelines]\nverify = [\"test\", \"test\"]\n[steps.test]\nrun = \"x\"", field: "pipelines.verify"},
+		{name: "bad timeout", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ntimeout = \"20 minutes\"", field: fieldTimeout},
+		{name: "timeout too short", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ntimeout = \"999ms\"", field: fieldTimeout},
+		{name: "timeout too long", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ntimeout = \"25h\"", field: fieldTimeout},
+		{name: "negative timeout", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ntimeout = \"-5m\"", field: fieldTimeout},
+		{name: "number timeout", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ntimeout = 20", field: fieldTimeout},
+		{name: "invalid drop regex", toml: head + minimal + "[filters]\ndrop = ['(unclosed']", field: fieldDrop},
+		{name: "drop not a list", toml: head + minimal + "[filters]\ndrop = 'x'", field: fieldDrop},
+		{name: "drop with a number", toml: head + minimal + "[filters]\ndrop = ['x', 1]", field: fieldDrop},
+		{name: "unknown filter", toml: head + minimal + "[filters]\nkeep = ['x']", field: "filters.keep"},
+		{name: "filters not a table", toml: head + "filters = 1\n" + minimal, field: "filters"},
+		{name: "typo in a step", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ncontinue_on_fial = true", field: "steps.test.continue_on_fial"},
+		{name: "junit comes in S3", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\njunit = \"a.xml\"", field: "steps.test.junit"},
+		{name: "secrets come in S3", toml: head + minimal + "[secrets]\nnpmrc = \"~/.npmrc\"", field: `"secrets"`},
+		{name: "empty run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"\"", field: fieldRun},
+		{name: "blank run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"  \"", field: fieldRun},
+		{name: "missing run", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\ntimeout = \"1m\"", field: fieldRun},
+		{name: "run not a string", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = [\"make\"]", field: fieldRun},
+		{name: "step not a table", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps]\ntest = \"make\"", field: "steps.test"},
+		{name: "bad step name", toml: head + "[pipelines]\ndefault = [\"Test\"]\n[steps.Test]\nrun = \"x\"", field: `"Test"`},
+		{name: "bad pipeline name", toml: head + "[pipelines]\nVerify = [\"test\"]\n[steps.test]\nrun = \"x\"", field: `"Verify"`},
+		{name: "pipeline not a list", toml: head + "[pipelines]\ndefault = \"test\"\n[steps.test]\nrun = \"x\"", field: "pipelines.default"},
+		{name: "continue_on_fail not a bool", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\ncontinue_on_fail = \"yes\"", field: "steps.test.continue_on_fail"},
+		{name: "skip path outside", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nskip_if_unchanged = [\"../lock\"]", field: fieldSkip},
+		{name: "skip path absolute", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nskip_if_unchanged = [\"/etc/passwd\"]", field: fieldSkip},
+		{name: "skip path empty", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nskip_if_unchanged = [\"\"]", field: fieldSkip},
+		{name: "env lower case", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nenv = { ci = \"1\" }", field: "steps.test.env.ci"},
+		{name: "env BURRO_", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nenv = { BURRO_STEP = \"1\" }", field: "steps.test.env.BURRO_STEP"},
+		{name: "env not a string", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nenv = { CI = true }", field: "steps.test.env.CI"},
+		{name: "env not a table", toml: head + "[pipelines]\ndefault = [\"test\"]\n[steps.test]\nrun = \"x\"\nenv = \"CI=1\"", field: "steps.test.env"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.toml), "myapp")
+			msg, fix := usageError(t, err)
+			if !strings.Contains(msg+" "+fix, tt.field) {
+				t.Fatalf("error %q / fix %q doesn't name %s", msg, fix, tt.field)
+			}
+		})
+	}
+}
+
+// describe lists the selected steps, with the reason in brackets for those
+// that stay out.
+func describe(sel []config.Selected) string {
+	parts := make([]string, 0, len(sel))
+	for _, s := range sel {
+		part := s.Step.Name
+		if s.Skip != "" {
+			part += "(" + s.Skip + ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
+}
+
+// acceptance: S2-05
+func TestSelect(t *testing.T) {
+	c, err := config.Parse([]byte(full), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		pipeline string
+		from     string
+		only     []string
+		want     string
+	}{
+		{name: "all", pipeline: verify, want: "install unit e2e lighthouse"},
+		{name: "from", pipeline: verify, from: e2e, want: "install(--from e2e) unit(--from e2e) e2e lighthouse"},
+		{name: "from the first", pipeline: verify, from: install, want: "install unit e2e lighthouse"},
+		{name: "only keeps pipeline order", pipeline: verify, only: []string{"lighthouse", unit}, want: "install(--only lighthouse,unit) unit e2e(--only lighthouse,unit) lighthouse"},
+		{name: "from and only", pipeline: verify, from: unit, only: []string{install, e2e}, want: "install(--from unit) unit(--only install,e2e) e2e lighthouse(--only install,e2e)"},
+		{name: "default", pipeline: config.DefaultPipeline, only: []string{unit, unit}, want: "install(--only unit,unit) unit"},
+	}
+	for _, tt := range tests {
+		sel, err := c.Select(tt.pipeline, tt.from, tt.only)
+		if err != nil || describe(sel) != tt.want {
+			t.Errorf("%s: got %q, %v; want %q", tt.name, describe(sel), err, tt.want)
+		}
+	}
+}
+
+// acceptance: S2-05
+func TestSelectRejects(t *testing.T) {
+	c, err := config.Parse([]byte(full), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []struct {
+		pipeline, from string
+		only           []string
+		names          string
+	}{
+		{pipeline: "nope", names: "default, verify"},
+		{pipeline: config.DefaultPipeline, from: e2e, names: "install, unit"},
+		{pipeline: verify, only: []string{unit, "nope"}, names: "install, unit, e2e, lighthouse"},
+		{pipeline: verify, only: []string{""}, names: install},
+		{pipeline: verify, from: "unused", names: install},
+	} {
+		_, err := c.Select(bad.pipeline, bad.from, bad.only)
+		if _, fix := usageError(t, err); !strings.Contains(fix, bad.names) {
+			t.Errorf("Select(%q, %q, %q): fix %q", bad.pipeline, bad.from, bad.only, fix)
+		}
+	}
+}
+
+func TestValidRun(t *testing.T) {
+	for _, ok := range []string{"r1", "r42", "r999999999"} {
+		if err := config.ValidRun(ok); err != nil {
+			t.Errorf("%q rejected", ok)
+		}
+	}
+	for _, bad := range []string{"", "r", "r0", "r01", "42", "R1", "r1/../x", "r1 ", "r1234567890", "-r1"} {
+		if err := config.ValidRun(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		} else {
+			usageError(t, err)
+		}
+	}
+}
+
+func FuzzRunConfig(f *testing.F) {
+	for _, seed := range testutil.FuzzSeeds(f, "FuzzRunConfig") {
+		f.Add(seed, "e2e")
+	}
+	f.Fuzz(func(t *testing.T, data []byte, from string) {
+		c, err := config.Parse(data, "app")
+		if err != nil {
+			usageError(t, err)
+			return
+		}
+		for _, name := range c.Pipelines() {
+			checkSelection(t, c, name, from)
+		}
+	})
+}
+
+// checkSelection selects pipeline from from and fails on a rejection
+// without exit 4 or on a step that validation should have refused.
+func checkSelection(t *testing.T, c *config.Config, pipeline, from string) {
+	t.Helper()
+	sel, err := c.Select(pipeline, from, nil)
+	if err != nil {
+		usageError(t, err)
+		return
+	}
+	for _, s := range sel {
+		if s.Step.Run == "" || s.Step.Timeout < time.Second || s.Step.Timeout > 24*time.Hour {
+			t.Fatalf("accepted an invalid step %+v", s.Step)
+		}
 	}
 }
 

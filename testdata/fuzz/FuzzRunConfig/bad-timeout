@@ -1,0 +1,6 @@
+host = "a"
+[pipelines]
+default = ["t"]
+[steps.t]
+run = "x"
+timeout = "0s"
