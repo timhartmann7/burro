@@ -32,6 +32,8 @@ func TestReport(t *testing.T) {
 			stderr: "burro: run r3 is active\nfix: run burro wait\n",
 		},
 		{name: "uncoded", err: errors.New("write output: broken pipe"), code: 2, stderr: "burro: write output: broken pipe\n"},
+		{name: "silent", err: output.Silent(output.ExitFailed), code: 1, stderr: ""},
+		{name: "silent wrapped", err: fmt.Errorf("exec: %w", output.Silent(output.ExitServer)), code: 2, stderr: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,6 +45,13 @@ func TestReport(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", stderr.String(), tt.stderr)
 			}
 		})
+	}
+}
+
+func TestErrorParts(t *testing.T) {
+	e := output.NewError(output.ExitBusy, "run r3 is active", "run burro wait")
+	if e.Code() != output.ExitBusy || e.Fix() != "run burro wait" || e.Error() != "run r3 is active" {
+		t.Fatalf("got %d %q %q", e.Code(), e.Fix(), e.Error())
 	}
 }
 

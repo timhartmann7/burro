@@ -1,0 +1,4 @@
+line 1
+line 2
++812 lines hidden · full output: burro exec -- tail -n 200 .burro/exec/e7.log
+exit 127

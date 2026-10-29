@@ -1,0 +1,1 @@
+{"hosts":[{"name":"vps1","address":"root@203.0.113.10:2222","version":"0.1.0"},{"name":"build-box","address":"ci@198.51.100.7","version":"not installed"},{"name":"old","address":"old","version":"unreachable"}]}

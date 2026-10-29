@@ -1,0 +1,6 @@
+ssh     ok    82ms round trip
+rsync   FAIL  not found · install rsync on the server, for example apt install rsync
+bash    ok    5.2.37
+docker  ok    not found, needed only if steps use docker
+disk    ok    41.2 GB free in /home/burro
+burro   ok    0.1.0
