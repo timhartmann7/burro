@@ -156,11 +156,14 @@ jobs:
           BEFORE: ${{ github.event.before }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The first push of a branch has no before; its pushed commits are
+        # those the default branch doesn't have yet.
         run: |
           if [ -n "$BASE" ]; then
             range="$BASE..$HEAD_SHA"
           elif [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
-            range="$HEAD_SHA"
+            range="origin/$DEFAULT_BRANCH..$HEAD_SHA"
           else
             range="$BEFORE..$HEAD_SHA"
           fi
