@@ -1,0 +1,19 @@
+total 12 · failed 6 · skipped 3
+e2e/site.spec.js:8  cohorts are listed
+  message: expect(received).toHaveLength(expected)
+  frame: e2e/site.spec.js:10
+e2e/site.spec.js:13  roles load
+  message: roles are missing
+  frame: e2e/site.spec.js:14
+e2e/site.spec.js:8  cohorts are listed
+  message: expect(received).toHaveLength(expected)
+  frame: e2e/site.spec.js:10
+e2e/site.spec.js:13  roles load
+  message: roles are missing
+  frame: e2e/site.spec.js:14
+e2e/site.spec.js:8  cohorts are listed
+  message: expect(received).toHaveLength(expected)
+  frame: e2e/site.spec.js:10
+e2e/site.spec.js:13  roles load
+  message: roles are missing
+  frame: e2e/site.spec.js:14

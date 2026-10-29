@@ -1,0 +1,1 @@
+<testsuite><testcase name="a"><failure message="m"><![CDATA[at /app/x.js:1:2]]></failure><failure/><skipped/><system-out>&lt;x&gt;</system-out></testcase><testcase name="b"><flakyFailure><failure/></flakyFailure></testcase></testsuite>

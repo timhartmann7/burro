@@ -1,0 +1,7 @@
+total 4 · failed 2 · skipped 1
+example.com/calc:0  TestDivide
+  message: Divide(6, 3) = 2, want 3
+  frame: calc_test.go:13
+example.com/calc:0  TestParse
+  message: panic: config is broken [recovered]
+  frame: calc.go:9

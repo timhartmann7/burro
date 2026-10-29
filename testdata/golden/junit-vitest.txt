@@ -1,0 +1,7 @@
+total 4 · failed 2 · skipped 1
+vitest/calc.test.mjs:0  calc > divides numbers
+  message: expected 2 to be 3 // Object.is equality
+  frame: vitest/calc.test.mjs:10
+vitest/calc.test.mjs:0  calc > parses the config
+  message: config is broken
+  frame: vitest/calc.test.mjs:14

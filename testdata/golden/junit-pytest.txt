@@ -1,0 +1,10 @@
+total 5 · failed 3 · skipped 1
+tests/test_calc.py:0  test_divides
+  message: assert 2.0 == 3
+  frame: tests/test_calc.py:11
+tests/test_calc.py:0  test_parses_config
+  message: ValueError: config is broken
+  frame: tests/test_calc.py:15
+tests/test_calc.py:0  test_reads_rows
+  message: failed on setup with "RuntimeError: database is down"
+  frame: tests/test_calc.py:25

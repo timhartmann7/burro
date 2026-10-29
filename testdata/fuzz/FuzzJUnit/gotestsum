@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="2" errors="0" time="1.977054">
+	<testsuite tests="4" failures="2" time="0.005000" name="example.com/calc" timestamp="2026-10-29T16:02:29Z">
+		<properties>
+			<property name="go.version" value="go1.24.4 linux/arm64"></property>
+		</properties>
+		<testcase classname="example.com/calc" name="TestDivide" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestDivide&#xA;    calc_test.go:13: Divide(6, 3) = 2, want 3&#xA;--- FAIL: TestDivide (0.00s)&#xA;</failure>
+		</testcase>
+		<testcase classname="example.com/calc" name="TestParse" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestParse&#xA;--- FAIL: TestParse (0.00s)&#xA;panic: config is broken [recovered]&#xA;&#x9;panic: config is broken&#xA;&#xA;goroutine 9 [running]:&#xA;testing.tRunner.func1.2({0x147c60, 0x4000018410})&#xA;&#x9;/usr/lib/go-1.24/src/testing/testing.go:1734 +0x1ac&#xA;testing.tRunner.func1()&#xA;&#x9;/usr/lib/go-1.24/src/testing/testing.go:1737 +0x334&#xA;panic({0x147c60?, 0x4000018410?})&#xA;&#x9;/usr/lib/go-1.24/src/runtime/panic.go:792 +0x124&#xA;example.com/calc.Parse(...)&#xA;&#x9;/app/calc.go:9&#xA;example.com/calc.TestParse(0x4000003dc0?)&#xA;&#x9;/app/calc_test.go:22 +0x54&#xA;testing.tRunner(0x4000003dc0, 0x17d190)&#xA;&#x9;/usr/lib/go-1.24/src/testing/testing.go:1792 +0xe4&#xA;created by testing.(*T).Run in goroutine 1&#xA;&#x9;/usr/lib/go-1.24/src/testing/testing.go:1851 +0x374&#xA;</failure>
+		</testcase>
+		<testcase classname="example.com/calc" name="TestMultiply" time="0.000000">
+			<skipped message="=== RUN   TestMultiply&#xA;    calc_test.go:18: not ready&#xA;--- SKIP: TestMultiply (0.00s)&#xA;"></skipped>
+		</testcase>
+		<testcase classname="example.com/calc" name="TestAdd" time="0.000000"></testcase>
+	</testsuite>
+</testsuites>

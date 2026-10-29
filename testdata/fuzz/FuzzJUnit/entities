@@ -1,0 +1,1 @@
+<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]><testsuite><testcase name="&b;"><failure/></testcase></testsuite>

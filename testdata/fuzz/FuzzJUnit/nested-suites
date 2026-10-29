@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="CLI Arguments" tests="4" assertions="2" errors="1" failures="1" skipped="1" time="0.002602">
+    <testsuite name="CalcTest" file="/app/tests/CalcTest.php" tests="4" assertions="2" errors="1" failures="1" skipped="1" time="0.002602">
+      <testcase name="testAdds" file="/app/tests/CalcTest.php" line="7" class="CalcTest" classname="CalcTest" assertions="1" time="0.000694"/>
+      <testcase name="testDivides" file="/app/tests/CalcTest.php" line="12" class="CalcTest" classname="CalcTest" assertions="1" time="0.001741">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">CalcTest::testDivides
+Failed asserting that 2 is identical to 3.
+
+/app/tests/CalcTest.php:14</failure>
+      </testcase>
+      <testcase name="testParsesConfig" file="/app/tests/CalcTest.php" line="17" class="CalcTest" classname="CalcTest" assertions="0" time="0.000083">
+        <error type="RuntimeException">CalcTest::testParsesConfig
+RuntimeException: config is broken
+
+/app/tests/CalcTest.php:19</error>
+      </testcase>
+      <testcase name="testMultiplies" file="/app/tests/CalcTest.php" line="22" class="CalcTest" classname="CalcTest" assertions="0" time="0.000085">
+        <skipped/>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
