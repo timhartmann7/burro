@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"strings"
@@ -19,7 +20,7 @@ const (
 func TestRunHelp(t *testing.T) {
 	for _, args := range [][]string{nil, {}, {helpFlag}, {helpFlag, versionFlag}} {
 		var stdout strings.Builder
-		if err := New(&stdout, "").Run(args); err != nil {
+		if err := New(nil, &stdout, nil, "").Run(args); err != nil {
 			t.Fatalf("Run(%q) = %v", args, err)
 		}
 		testutil.Golden(t, "help.txt", stdout.String())
@@ -28,7 +29,7 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunVersion(t *testing.T) {
 	var stdout strings.Builder
-	if err := New(&stdout, "0.3.1").Run([]string{versionFlag, helpFlag}); err != nil {
+	if err := New(nil, &stdout, nil, "0.3.1").Run([]string{versionFlag, helpFlag}); err != nil {
 		t.Fatal(err)
 	}
 	if want := "burro 0.3.1 " + runtime.GOOS + "/" + runtime.GOARCH + "\n"; stdout.String() != want {
@@ -38,7 +39,7 @@ func TestRunVersion(t *testing.T) {
 
 func TestRunUnknownCommand(t *testing.T) {
 	var stdout, stderr strings.Builder
-	err := New(&stdout, "").Run([]string{"--json"})
+	err := New(nil, &stdout, nil, "").Run([]string{argJSON})
 	if code := output.Report(&stderr, err); code != 4 {
 		t.Fatalf("code = %d, want 4", code)
 	}
@@ -58,7 +59,7 @@ func (brokenWriter) Write([]byte) (int, error) {
 
 func TestRunWriteError(t *testing.T) {
 	for _, args := range [][]string{{helpFlag}, {versionFlag}} {
-		err := New(brokenWriter{}, "").Run(args)
+		err := New(nil, brokenWriter{}, nil, "").Run(args)
 		var coded *output.Error
 		if err == nil || errors.As(err, &coded) || !strings.Contains(err.Error(), "broken pipe") {
 			t.Fatalf("Run(%q) = %v, want the uncoded write error", args, err)
@@ -68,19 +69,20 @@ func TestRunWriteError(t *testing.T) {
 
 func TestRegistryDispatchAndHelp(t *testing.T) {
 	var gotArgs []string
-	app := New(&strings.Builder{}, "")
+	app := New(nil, &strings.Builder{}, nil, "")
 	app.commands = []command{
-		{name: "sync", group: groupServer, summary: "copy the code to the server without a run"},
+		{name: argSync, group: groupServer, summary: "copy the code to the server without a run"},
 		{
-			name: "run", args: "[pipeline]", group: groupRun, summary: "sync the code and start a run, returns at once",
-			run: func(args []string) error { gotArgs = args; return nil },
+			name: "run", brief: "run [pipeline]", group: groupRun, summary: "sync the code and start a run, returns at once",
+			maxArgs: 1,
+			run:     func(_ context.Context, p *parsed) error { gotArgs = p.args; return nil },
 		},
 		{name: "init", group: groupSetup, summary: "set up this project and the agent rules"},
 	}
-	if err := app.Run([]string{"run", "verify", "--json"}); err != nil {
+	if err := app.Run([]string{"run", "verify", argJSON}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(gotArgs, " ") != "verify --json" {
+	if strings.Join(gotArgs, " ") != "verify" {
 		t.Fatalf("run got args %q", gotArgs)
 	}
 

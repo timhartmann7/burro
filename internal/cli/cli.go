@@ -2,18 +2,26 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
 
+	"github.com/timhartmann7/burro/internal/agent"
+	"github.com/timhartmann7/burro/internal/mode"
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/serverbin"
 )
 
 // helpWidth is the widest line any help screen may print.
 const helpWidth = 80
+
+// serverProblem labels exit code 2 in help screens.
+const serverProblem = "server problem"
 
 type group int
 
@@ -23,27 +31,57 @@ const (
 	groupServer
 )
 
-// command is one registry entry. Dispatch and help both read it, so a command
-// can't exist without its help line.
-type command struct {
-	name    string
-	args    string
-	group   group
-	summary string
-	run     func(args []string) error
+// serverBinaries hands out the executor for a server's architecture.
+// Tests swap in binaries they build themselves.
+type serverBinaries interface {
+	ForMachine(machine string) ([]byte, error)
 }
 
 // App is burro's command line.
 type App struct {
+	stdin    io.Reader
 	stdout   io.Writer
+	env      []string
 	version  string
+	terminal bool
+	binaries serverBinaries
 	commands []command
 }
 
-// New returns the app. linkedVersion is the version set with -ldflags -X, or
-// empty in a plain build.
-func New(stdout io.Writer, linkedVersion string) *App {
-	return &App{stdout: stdout, version: resolveVersion(linkedVersion)}
+// New returns the app. env is the process environment; linkedVersion is the
+// version set with -ldflags -X, or empty in a plain build.
+func New(stdin io.Reader, stdout io.Writer, env []string, linkedVersion string) *App {
+	a := &App{
+		stdin:    stdin,
+		stdout:   stdout,
+		env:      env,
+		version:  resolveVersion(linkedVersion),
+		terminal: isTerminal(stdout),
+		binaries: serverbin.New(),
+	}
+	a.commands = a.registry()
+	return a
+}
+
+// isTerminal tells whether w is a character device such as a terminal.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(interface{ Stat() (os.FileInfo, error) })
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// getenv reads the environment the app was built with; the last entry wins,
+// as in the process environment.
+func (a *App) getenv(name string) string {
+	for i := len(a.env) - 1; i >= 0; i-- {
+		if k, v, ok := strings.Cut(a.env[i], "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
 }
 
 // Run executes the command named by args.
@@ -51,17 +89,43 @@ func (a *App) Run(args []string) error {
 	if len(args) == 0 || args[0] == "--help" {
 		return a.write(a.help())
 	}
-	if args[0] == "--version" {
+	switch args[0] {
+	case "--version":
 		return a.write(fmt.Sprintf("burro %s %s/%s\n", a.version, runtime.GOOS, runtime.GOARCH))
+	case "agent":
+		return agent.New(a.stdin, a.stdout, a.getenv("HOME")).Run(args[1:])
 	}
-	for _, c := range a.commands {
-		if c.name == args[0] {
-			return c.run(args[1:])
+	c, rest := a.find(args)
+	if c == nil {
+		return output.NewError(output.ExitUsage,
+			fmt.Sprintf("unknown command %q", args[0]),
+			"run burro --help")
+	}
+	p, err := c.parse(rest)
+	if err != nil {
+		return err
+	}
+	if p.help {
+		return a.write(c.helpText())
+	}
+	m, err := mode.New(p.flags["mode"], a.getenv, a.terminal)
+	if err != nil {
+		return output.NewError(output.ExitUsage, err.Error(), "pass --mode agent or --mode human")
+	}
+	p.print = output.NewPrinter(a.stdout, p.flags["json"] == flagSet, m)
+	return c.run(context.Background(), p)
+}
+
+// find returns the command whose words start args, and the arguments after
+// them.
+func (a *App) find(args []string) (c *command, rest []string) {
+	for i := range a.commands {
+		words := strings.Fields(a.commands[i].name)
+		if len(args) >= len(words) && strings.Join(args[:len(words)], " ") == a.commands[i].name {
+			return &a.commands[i], args[len(words):]
 		}
 	}
-	return output.NewError(output.ExitUsage,
-		fmt.Sprintf("unknown command %q", args[0]),
-		"run burro --help")
+	return nil, nil
 }
 
 func (a *App) write(s string) error {
@@ -77,8 +141,8 @@ func (a *App) help() string {
 	b.WriteString("Usage: burro <command> [flags]\n")
 
 	width := 0
-	for _, c := range a.commands {
-		width = max(width, len(c.usage()))
+	for i := range a.commands {
+		width = max(width, len(a.commands[i].briefText()))
 	}
 	groups := []struct {
 		group group
@@ -90,13 +154,14 @@ func (a *App) help() string {
 	}
 	for _, g := range groups {
 		title := "\n" + g.title + "\n"
-		for _, c := range a.commands {
+		for i := range a.commands {
+			c := &a.commands[i]
 			if c.group != g.group {
 				continue
 			}
 			b.WriteString(title)
 			title = ""
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, c.usage(), c.summary)
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, c.briefText(), c.summary)
 		}
 	}
 
@@ -104,20 +169,13 @@ func (a *App) help() string {
 	b.WriteString(exitCodes([]exitLabel{
 		{output.ExitPassed, "passed"},
 		{output.ExitFailed, "tests failed"},
-		{output.ExitServer, "server problem"},
+		{output.ExitServer, serverProblem},
 		{output.ExitRunning, "still running"},
 		{output.ExitUsage, "bad config or flags"},
 		{output.ExitBusy, "another run is active"},
 	}))
 	b.WriteString("\nburro <command> --help   details and an example\n")
 	return b.String()
-}
-
-func (c command) usage() string {
-	if c.args == "" {
-		return c.name
-	}
-	return c.name + " " + c.args
 }
 
 type exitLabel struct {

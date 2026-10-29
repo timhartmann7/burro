@@ -1,0 +1,8 @@
+burro doctor · check ssh, rsync, bash, docker, free disk and the server binary
+
+Usage: burro doctor [host]
+
+Example
+  burro doctor myserver
+
+Exit codes  0 all ok · 2 a check failed · 4 unknown host or bad burro.toml

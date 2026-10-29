@@ -1,0 +1,11 @@
+burro host add · add a server burro can run on
+
+Usage: burro host add <name> <user@host[:port]> [-i key] [--force]
+
+  -i key     ssh key for this server, skip it if plain ssh already works
+  --force    replace a server with the same name
+
+Example
+  burro host add myserver root@203.0.113.10 -i ~/.ssh/id_ed25519
+
+Exit codes  0 added · 2 server unreachable or host key unknown · 4 name taken

@@ -2,6 +2,15 @@ burro · run your coding agent's tests on your own server
 
 Usage: burro <command> [flags]
 
+Set up (once)
+  host add <name> <user@host>   add a server
+
+Server
+  exec -- <command>             run one command on the server
+  sync                          copy the code to the server without a run
+  doctor                        check that the server is ready
+  host ls                       list your servers
+
 Exit codes  0 passed · 1 tests failed · 2 server problem · 3 still running
             4 bad config or flags · 5 another run is active
 

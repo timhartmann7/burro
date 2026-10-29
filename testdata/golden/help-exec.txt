@@ -1,0 +1,13 @@
+burro exec · run a command or local script in the project folder on the server
+
+Usage: burro exec [--max-lines 60] [--] cmd args…
+       burro exec --file path [args…]
+
+  --max-lines n    lines to show, the rest stays on the server (default 60)
+  --file path      local script to run, with its shebang or bash
+
+Example
+  burro exec -- ls -la
+
+Exit codes  0 command passed · 1 command failed · 2 server problem
+            4 bad flags or burro.toml
