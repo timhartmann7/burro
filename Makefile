@@ -114,8 +114,10 @@ english:
 test:
 	$(GO_TOOL) gotestsum -- -race -shuffle=on -count=1 ./...
 
+# One pass of the run tests takes minutes, so COUNT=5 needs more than go
+# test's default of 10 minutes per package.
 test-integration:
-	$(GO_TOOL) gotestsum -- -tags integration -race -shuffle=on -count=$(COUNT) ./...
+	$(GO_TOOL) gotestsum -- -tags integration -race -shuffle=on -count=$(COUNT) -timeout 30m ./...
 
 fuzz:
 	@for pkg in $$(go list ./...); do \
