@@ -1,0 +1,6 @@
+host = "a"
+[pipelines]
+default = ["t"]
+[steps.t]
+run = "x"
+env = { BURRO_X = "1" }

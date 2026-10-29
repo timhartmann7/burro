@@ -11,6 +11,7 @@ import (
 
 	"github.com/timhartmann7/burro/internal/agent"
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/runner"
 )
 
 // project makes a home folder with a project in it and returns both.
@@ -27,7 +28,7 @@ func project(t *testing.T) (home, dir string) {
 func call(t *testing.T, home, stdin string, args ...string) agent.Reply {
 	t.Helper()
 	var out strings.Builder
-	if err := agent.New(strings.NewReader(stdin), &out, home).Run(args); err != nil {
+	if err := agent.New(strings.NewReader(stdin), &out, home, nil, "", runner.Exec).Run(args); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(out.String(), "\n") != 1 {
@@ -195,7 +196,7 @@ func TestExecFailures(t *testing.T) {
 		{name: "no path", args: execCall("", "5", "true"), code: output.ExitUsage},
 		{name: "bad flag", args: []string{action, "--nope"}, code: output.ExitUsage},
 		{name: "zero lines", args: execCall(appPath, "0", "true"), code: output.ExitUsage},
-		{name: "unknown call", args: []string{"start"}, code: output.ExitServer, msg: "unknown agent call"},
+		{name: "unknown call", args: []string{"begin"}, code: output.ExitServer, msg: "unknown agent call"},
 		{name: "no call", args: nil, code: output.ExitServer},
 	}
 	for _, tt := range tests {
@@ -218,7 +219,7 @@ func TestExecFailures(t *testing.T) {
 }
 
 func TestReplyWriteError(t *testing.T) {
-	err := agent.New(strings.NewReader(""), brokenWriter{}, t.TempDir()).Run(nil)
+	err := agent.New(strings.NewReader(""), brokenWriter{}, t.TempDir(), nil, "", runner.Exec).Run(nil)
 	if err == nil || !strings.Contains(err.Error(), "broken pipe") {
 		t.Fatalf("got %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/timhartmann7/burro/internal/agent"
 	"github.com/timhartmann7/burro/internal/mode"
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/runner"
 	"github.com/timhartmann7/burro/internal/serverbin"
 )
 
@@ -37,10 +38,23 @@ type serverBinaries interface {
 	ForMachine(machine string) ([]byte, error)
 }
 
+const (
+	// binaryName is burro's own name in version lines, checks and the
+	// commands it prints.
+	binaryName = "burro"
+	// agentCommand is the hidden command family the server side answers.
+	agentCommand = "agent"
+)
+
+// shmRoot is the tmpfs folder on the server that holds one folder per run
+// for its secrets.
+const shmRoot = "/dev/shm/burro"
+
 // App is burro's command line.
 type App struct {
 	stdin    io.Reader
 	stdout   io.Writer
+	stderr   io.Writer
 	env      []string
 	version  string
 	terminal bool
@@ -48,12 +62,15 @@ type App struct {
 	commands []command
 }
 
-// New returns the app. env is the process environment; linkedVersion is the
-// version set with -ldflags -X, or empty in a plain build.
-func New(stdin io.Reader, stdout io.Writer, env []string, linkedVersion string) *App {
+// New returns the app. stderr gets only what a human reads beside the
+// result, such as the progress line. env is the process environment;
+// linkedVersion is the version set with -ldflags -X, or empty in a plain
+// build.
+func New(stdin io.Reader, stdout, stderr io.Writer, env []string, linkedVersion string) *App {
 	a := &App{
 		stdin:    stdin,
 		stdout:   stdout,
+		stderr:   stderr,
 		env:      env,
 		version:  resolveVersion(linkedVersion),
 		terminal: isTerminal(stdout),
@@ -92,8 +109,8 @@ func (a *App) Run(args []string) error {
 	switch args[0] {
 	case "--version":
 		return a.write(fmt.Sprintf("burro %s %s/%s\n", a.version, runtime.GOOS, runtime.GOARCH))
-	case "agent":
-		return agent.New(a.stdin, a.stdout, a.getenv("HOME")).Run(args[1:])
+	case agentCommand:
+		return a.agent(args[1:])
 	}
 	c, rest := a.find(args)
 	if c == nil {
@@ -113,7 +130,21 @@ func (a *App) Run(args []string) error {
 		return output.NewError(output.ExitUsage, err.Error(), "pass --mode agent or --mode human")
 	}
 	p.print = output.NewPrinter(a.stdout, p.flags["json"] == flagSet, m)
+	p.human = m.Human()
 	return c.run(context.Background(), p)
+}
+
+// agent runs the server side: a runner, or a short executor call.
+func (a *App) agent(args []string) error {
+	if len(args) > 0 && args[0] == agent.RunnerCall {
+		return runner.New(a.env).Run(args[1:])
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find the server binary: %w", err)
+	}
+	runnerCmd := []string{self, agentCommand, agent.RunnerCall}
+	return agent.New(a.stdin, a.stdout, a.getenv("HOME"), runnerCmd, shmRoot, runner.Exec).Run(args)
 }
 
 // find returns the command whose words start args, and the arguments after
@@ -165,6 +196,10 @@ func (a *App) help() string {
 		}
 	}
 
+	b.WriteString("\nTypical loop\n")
+	b.WriteString("  burro run           start\n")
+	b.WriteString("  burro wait          Ctrl+C is safe, the run keeps going\n")
+	b.WriteString("  burro log --step e2e --grep login\n")
 	b.WriteString("\n")
 	b.WriteString(exitCodes([]exitLabel{
 		{output.ExitPassed, "passed"},

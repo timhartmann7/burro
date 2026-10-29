@@ -1,1 +1,7 @@
 host = "vps1"
+
+[pipelines]
+default = ["test"]
+
+[steps.test]
+run = "make test"

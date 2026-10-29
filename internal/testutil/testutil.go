@@ -5,7 +5,9 @@ package testutil
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,4 +243,34 @@ func FuzzSeeds(tb testing.TB, name string) [][]byte {
 		seeds = append(seeds, data)
 	}
 	return seeds
+}
+
+// NoisyLog generates about size bytes of a test runner's log the way a
+// terminal-aware tool writes it: colors, \r progress redraws, cursor codes,
+// raw binary bytes and broken UTF-8. Every 500th line mentions "cohorts".
+// The same seed gives the same log.
+func NoisyLog(size int, seed uint64) []byte {
+	var b bytes.Buffer
+	for i := 0; b.Len() < size; i++ {
+		// Hashing the seed and the line number gives bytes that look random
+		// and are the same on every run.
+		noise := sha256.Sum256(fmt.Appendf(nil, "%d/%d", seed, i))
+		switch {
+		case i%500 == 0:
+			fmt.Fprintf(&b, "\x1b[31m  x\x1b[0m cohorts are listed (%d)\n", i)
+		case i%7 == 0:
+			for p := 0; p <= 100; p += 25 {
+				fmt.Fprintf(&b, "\x1b[2K\rdownloading %3d%% \x1b[?25l", p)
+			}
+			b.WriteString("\x1b[?25h\n")
+		case i%11 == 0:
+			b.Write(noise[:16+int(noise[0])%16])
+			b.WriteString("\n")
+		case i%13 == 0:
+			b.WriteString("\x1b]0;title\x07\x1b[1;32m\u2713\x1b[m caf\xc3 \xff\xfe test done\r\n")
+		default:
+			fmt.Fprintf(&b, "\x1b[90m[%06d]\x1b[39m step output line with some text %x\n", i, noise[:4])
+		}
+	}
+	return b.Bytes()
 }

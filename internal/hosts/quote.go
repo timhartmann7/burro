@@ -8,15 +8,17 @@ import "strings"
 func commandLine(argv []string) string {
 	quoted := make([]string, len(argv))
 	for i, a := range argv {
-		quoted[i] = quote(a)
+		quoted[i] = Quote(a)
 	}
 	return strings.Join(quoted, " ")
 }
 
-// quote leaves plain words bare, which keeps command lines readable, and
-// single-quotes everything else. Inside single quotes only the quote itself
-// needs care: it closes the string, adds an escaped quote and reopens it.
-func quote(s string) string {
+// Quote makes s one word for a POSIX shell, for remote command lines and for
+// the commands burro prints for the user. Plain words stay bare, which keeps
+// command lines readable; everything else is single-quoted. Inside single
+// quotes only the quote itself needs care: it closes the string, adds an
+// escaped quote and reopens it.
+func Quote(s string) string {
 	if s != "" && strings.IndexFunc(s, unsafeRune) < 0 {
 		return s
 	}

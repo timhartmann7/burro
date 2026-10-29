@@ -68,6 +68,8 @@ type parsed struct {
 	flags map[string]string
 	help  bool
 	print *output.Printer
+	// human is set in human mode, where stderr may carry progress.
+	human bool
 }
 
 func (c *command) flag(name string) *flagSpec {
@@ -197,6 +199,18 @@ func (c *command) helpText() string {
 	return b.String()
 }
 
+// runExits are the exit codes of commands that report a run's result.
+// running labels code 3.
+func runExits(running string) []exitLabel {
+	return []exitLabel{
+		{output.ExitPassed, "passed"},
+		{output.ExitFailed, "tests failed"},
+		{output.ExitServer, "server problem or runner died"},
+		{output.ExitRunning, running},
+		{output.ExitUsage, "bad flags or unknown run"},
+	}
+}
+
 // registry lists every public command in help order.
 func (a *App) registry() []command {
 	return []command{
@@ -220,6 +234,89 @@ func (a *App) registry() []command {
 				{output.ExitUsage, "name taken"},
 			},
 			run: a.hostAdd,
+		},
+		{
+			name:    "run",
+			brief:   "run [pipeline]",
+			summary: "sync the code and start a run, returns at once",
+			group:   groupRun,
+			about:   "sync the code and start a pipeline on the server, returns at once",
+			usage:   []string{"run [pipeline] [--from step] [--only a,b]"},
+			flags: []flagSpec{
+				{name: "from", arg: "step", usage: "start at this step, the ones before it don't run"},
+				{name: "only", arg: "a,b", usage: "run only these steps, in pipeline order"},
+			},
+			maxArgs: 1,
+			example: "burro run verify --from e2e",
+			exits: []exitLabel{
+				{output.ExitPassed, "started"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "bad burro.toml or step"},
+				{output.ExitBusy, "another run is active"},
+			},
+			run: a.run,
+		},
+		{
+			name:    "wait",
+			summary: "wait for the run, then print a short summary",
+			group:   groupRun,
+			about:   "wait for a run to end, then print its summary",
+			usage:   []string{"wait [id] [--timeout 60m]"},
+			flags: []flagSpec{
+				{name: "timeout", arg: "d", def: "60m", usage: "stop waiting after this long, the run goes on"},
+			},
+			maxArgs: 1,
+			example: "burro wait r42 --timeout 30m",
+			exits:   runExits("still running, wait again"),
+			run:     a.wait,
+		},
+		{
+			name:    "status",
+			summary: "how the run is going",
+			group:   groupRun,
+			about:   "show the state of a run and of each step",
+			usage:   []string{"status [id]"},
+			maxArgs: 1,
+			example: "burro status r42",
+			exits:   runExits("still running"),
+			run:     a.status,
+		},
+		{
+			name:    cmdLog,
+			brief:   "log --step <name>",
+			summary: "clean log of one step, --grep to search it",
+			group:   groupRun,
+			about:   "print the clean log of one step: no ANSI codes, no binary bytes",
+			usage:   []string{"log [id] --step s [--grep re] [--tail 60] [--context 5]"},
+			flags: []flagSpec{
+				{name: "step", arg: "s", usage: "step whose log to print"},
+				{name: "grep", arg: "re", usage: "print only matching lines with context, Go regexp"},
+				{name: "tail", arg: "n", def: "60", usage: "most lines to print"},
+				{name: "context", arg: "n", def: defaultContext, usage: "lines around each match"},
+			},
+			maxArgs: 1,
+			example: "burro log r42 --step e2e --grep login",
+			exits: []exitLabel{
+				{output.ExitPassed, "printed"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "bad flags or unknown step"},
+			},
+			run: a.log,
+		},
+		{
+			name:    "cancel",
+			summary: "stop the run",
+			group:   groupRun,
+			about:   "stop a run and every process of its current step",
+			usage:   []string{"cancel [id]"},
+			maxArgs: 1,
+			example: "burro cancel r42",
+			exits: []exitLabel{
+				{output.ExitPassed, "stopped"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "unknown run"},
+			},
+			run: a.cancel,
 		},
 		{
 			name:    "exec",

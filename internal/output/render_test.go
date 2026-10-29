@@ -64,7 +64,7 @@ func render(t *testing.T, kind string, asJSON bool, m *mode.Mode) string {
 	case "exec-short":
 		err = p.Exec(output.Exec{Output: "no newline at the end", Log: ".burro/exec/e1.log", Exit: 1})
 	case kindSync:
-		err = p.Sync(output.Sync{Tree: "5530df9", Changed: 12, Took: 1430 * time.Millisecond})
+		err = p.Sync(output.Sync{Tree: shortTree, Changed: 12, Took: 1430 * time.Millisecond})
 	}
 	if err != nil {
 		t.Fatal(err)

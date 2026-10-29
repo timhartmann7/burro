@@ -1,0 +1,5 @@
+host = "a"
+[pipelines]
+default = ["t", "e2e"]
+[steps.t]
+run = "x"

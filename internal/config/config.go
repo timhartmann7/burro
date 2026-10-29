@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -29,10 +31,45 @@ const homePrefix = "~/"
 // file paths.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
+// Default limits of a step from docs/reference/config.md.
+const (
+	defaultTimeout = 60 * time.Minute
+	minTimeout     = time.Second
+	maxTimeout     = 24 * time.Hour
+	// DefaultPipeline is the pipeline burro run starts without a name.
+	DefaultPipeline = "default"
+)
+
+// envPattern keeps step variables to plain shell names.
+var envPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+// runPattern matches run ids: r1, r2, ...
+var runPattern = regexp.MustCompile(`^r[1-9]\d{0,8}$`)
+
 // Config is a validated burro.toml.
 type Config struct {
-	host string
-	path string
+	host      string
+	path      string
+	pipelines map[string][]string
+	steps     map[string]Step
+	drop      []*regexp.Regexp
+}
+
+// Step is one validated step of burro.toml.
+type Step struct {
+	Name            string
+	Run             string
+	Env             map[string]string
+	Timeout         time.Duration
+	ContinueOnFail  bool
+	SkipIfUnchanged []string
+}
+
+// Selected is one pipeline step of a run. Skip says why the step stays out
+// of the run, such as "--from e2e"; it is empty when the step runs.
+type Selected struct {
+	Step Step
+	Skip string
 }
 
 // Load reads and validates burro.toml in root. The default path uses the
@@ -58,20 +95,12 @@ func Parse(data []byte, repo string) (*Config, error) {
 	if _, err := toml.Decode(string(data), &raw); err != nil {
 		return nil, syntaxError(err)
 	}
-	keys := make([]string, 0, len(raw))
-	for k := range raw {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		if k != "host" && k != "path" {
-			return nil, output.NewError(output.ExitUsage,
-				fmt.Sprintf("%s: unknown key %q", File, k),
-				fmt.Sprintf("remove %q from %s; it knows host and path", k, File))
-		}
+	top := table{raw: raw}
+	if err := top.only("host", "path", "pipelines", "steps", "filters"); err != nil {
+		return nil, err
 	}
 
-	host, err := field(raw, "host", "")
+	host, err := top.str("host", "", "vps1")
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +112,7 @@ func Parse(data []byte, repo string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", File, err)
 	}
 
-	path, err := field(raw, "path", homePrefix+"burro/"+repo)
+	path, err := top.str("path", homePrefix+"burro/"+repo, homePrefix+"burro/myapp")
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +121,188 @@ func Parse(data []byte, repo string) (*Config, error) {
 			fmt.Sprintf("%s: path %q is not allowed", File, path),
 			`set path to a folder under ~/ or an absolute path without . or .. parts, for example path = "~/burro/myapp"`)
 	}
-	return &Config{host: host, path: strings.TrimSuffix(path, "/")}, nil
+	c := &Config{host: host, path: strings.TrimSuffix(path, "/")}
+	if c.steps, err = parseSteps(top); err != nil {
+		return nil, err
+	}
+	if c.pipelines, err = parsePipelines(top, c.steps); err != nil {
+		return nil, err
+	}
+	if c.drop, err = parseFilters(top); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func parseSteps(top table) (map[string]Step, error) {
+	t, ok, err := top.sub("steps")
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(t.raw) == 0 {
+		return nil, output.NewError(output.ExitUsage, File+": steps is missing",
+			`add a step to `+File+`, for example [steps.test] with run = "make test"`)
+	}
+	steps := map[string]Step{}
+	for _, name := range t.keys() {
+		if err := ValidName("step", name); err != nil {
+			return nil, fmt.Errorf("%s: steps: %w", File, err)
+		}
+		st, _, err := t.sub(name)
+		if err != nil {
+			return nil, err
+		}
+		step, err := parseStep(name, st)
+		if err != nil {
+			return nil, err
+		}
+		steps[name] = step
+	}
+	return steps, nil
+}
+
+func parseStep(name string, t table) (Step, error) {
+	s := Step{Name: name}
+	if err := t.only("run", "env", "timeout", "continue_on_fail", "skip_if_unchanged"); err != nil {
+		return s, err
+	}
+	var err error
+	if s.Run, err = t.str("run", "", "make test"); err != nil {
+		return s, err
+	}
+	if strings.TrimSpace(s.Run) == "" {
+		return s, output.NewError(output.ExitUsage, fmt.Sprintf("%s: %s is empty", File, t.key("run")),
+			fmt.Sprintf(`set %s to your test command, for example run = "make test"`, t.key("run")))
+	}
+	if s.Timeout, err = parseTimeout(t); err != nil {
+		return s, err
+	}
+	if s.ContinueOnFail, err = t.boolean("continue_on_fail"); err != nil {
+		return s, err
+	}
+	if s.SkipIfUnchanged, err = t.list("skip_if_unchanged", "pnpm-lock.yaml"); err != nil {
+		return s, err
+	}
+	for _, f := range s.SkipIfUnchanged {
+		if !filepath.IsLocal(f) {
+			return s, output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: %s: %q is not a path inside the project", File, t.key("skip_if_unchanged"), f),
+				fmt.Sprintf("list files in %s relative to the project root, without .. parts", t.key("skip_if_unchanged")))
+		}
+	}
+	s.Env, err = parseEnv(t)
+	return s, err
+}
+
+func parseTimeout(t table) (time.Duration, error) {
+	timeout, err := t.str("timeout", defaultTimeout.String(), "20m")
+	if err != nil {
+		return 0, err
+	}
+	d, err := time.ParseDuration(timeout)
+	if err != nil || d < minTimeout || d > maxTimeout {
+		return 0, output.NewError(output.ExitUsage,
+			fmt.Sprintf("%s: %s %q is not a duration from 1s to 24h", File, t.key("timeout"), timeout),
+			fmt.Sprintf(`set %s to a duration such as "20m" or "1h30m"`, t.key("timeout")))
+	}
+	return d, nil
+}
+
+func parseEnv(step table) (map[string]string, error) {
+	vars := map[string]string{}
+	env, ok, err := step.sub("env")
+	if err != nil || !ok {
+		return vars, err
+	}
+	for _, k := range env.keys() {
+		if !envPattern.MatchString(k) || strings.HasPrefix(k, "BURRO_") {
+			return nil, output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: %s is not an allowed variable name", File, env.key(k)),
+				fmt.Sprintf("rename %s to upper case letters, digits and _, not starting with BURRO_", env.key(k)))
+		}
+		if vars[k], err = env.str(k, "", "true"); err != nil {
+			return nil, err
+		}
+	}
+	return vars, nil
+}
+
+func parsePipelines(top table, steps map[string]Step) (map[string][]string, error) {
+	t, ok, err := top.sub("pipelines")
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(t.raw) == 0 {
+		return nil, output.NewError(output.ExitUsage, File+": pipelines is missing",
+			`add a pipeline to `+File+`, for example [pipelines] with default = ["test"]`)
+	}
+	pipelines := map[string][]string{}
+	for _, name := range t.keys() {
+		if err := ValidName("pipeline", name); err != nil {
+			return nil, fmt.Errorf("%s: pipelines: %w", File, err)
+		}
+		list, err := t.list(name, "test")
+		if err != nil {
+			return nil, err
+		}
+		if err := checkPipeline(t.key(name), list, steps); err != nil {
+			return nil, err
+		}
+		pipelines[name] = list
+	}
+	return pipelines, nil
+}
+
+// checkPipeline fails on a step that doesn't exist or comes twice. key is
+// the pipeline's field name.
+func checkPipeline(key string, list []string, steps map[string]Step) error {
+	for i, step := range list {
+		if _, ok := steps[step]; !ok {
+			return output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: %s: unknown step %q", File, key, step),
+				fmt.Sprintf("add [steps.%s] or remove %q from %s", tomlKey(step), step, key))
+		}
+		if slices.Contains(list[:i], step) {
+			return output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: %s lists step %q twice", File, key, step),
+				fmt.Sprintf("list %q once in %s", step, key))
+		}
+	}
+	return nil
+}
+
+func parseFilters(top table) ([]*regexp.Regexp, error) {
+	t, ok, err := top.sub("filters")
+	if err != nil || !ok {
+		return nil, err
+	}
+	if err := t.only("drop"); err != nil {
+		return nil, err
+	}
+	patterns, err := t.list("drop", `^\s*$`)
+	if err != nil {
+		return nil, err
+	}
+	drop := make([]*regexp.Regexp, 0, len(patterns))
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: %s: %q is not a valid regular expression", File, t.key("drop"), p),
+				fmt.Sprintf("fix the pattern in %s; it uses Go RE2 syntax", t.key("drop")))
+		}
+		drop = append(drop, re)
+	}
+	return drop, nil
+}
+
+// tomlKey prints a key the way it can be written back into a table header.
+// Unknown steps come from the user's file and may need quotes.
+func tomlKey(k string) string {
+	if namePattern.MatchString(k) {
+		return k
+	}
+	return strconv.Quote(k)
 }
 
 func syntaxError(err error) error {
@@ -111,26 +321,104 @@ func firstLine(s string) string {
 	return line
 }
 
-// field returns the string value of key, or def when the key is absent.
-func field(raw map[string]any, key, def string) (string, error) {
-	v, ok := raw[key]
+// table is one decoded TOML table with its dotted name, so every error names
+// the full field.
+type table struct {
+	name string
+	raw  map[string]any
+}
+
+func (t table) key(k string) string {
+	if t.name == "" {
+		return k
+	}
+	return t.name + "." + k
+}
+
+func (t table) keys() []string {
+	keys := make([]string, 0, len(t.raw))
+	for k := range t.raw {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// only fails on the first key, in sorted order, that allowed doesn't list.
+func (t table) only(allowed ...string) error {
+	for _, k := range t.keys() {
+		if !slices.Contains(allowed, k) {
+			return output.NewError(output.ExitUsage,
+				fmt.Sprintf("%s: unknown key %q", File, t.key(k)),
+				fmt.Sprintf("remove %q from %s; it knows %s", t.key(k), File, strings.Join(allowed, ", ")))
+		}
+	}
+	return nil
+}
+
+// str returns the string value of k, or def when the key is absent.
+func (t table) str(k, def, example string) (string, error) {
+	v, ok := t.raw[k]
 	if !ok {
 		return def, nil
 	}
 	s, ok := v.(string)
 	if !ok {
-		return "", output.NewError(output.ExitUsage,
-			fmt.Sprintf("%s: %s must be a string", File, key),
-			fmt.Sprintf(`write %s as a quoted string, for example %s = %q`, key, key, example(key)))
+		return "", t.typeError(k, "a string", fmt.Sprintf("%s = %q", tomlKey(k), example))
 	}
 	return s, nil
 }
 
-func example(key string) string {
-	if key == "host" {
-		return "vps1"
+func (t table) boolean(k string) (bool, error) {
+	v, ok := t.raw[k]
+	if !ok {
+		return false, nil
 	}
-	return homePrefix + "burro/myapp"
+	b, ok := v.(bool)
+	if !ok {
+		return false, t.typeError(k, "true or false", k+" = true")
+	}
+	return b, nil
+}
+
+// list returns the array of strings at k, empty when the key is absent.
+func (t table) list(k, example string) ([]string, error) {
+	v, ok := t.raw[k]
+	if !ok {
+		return nil, nil
+	}
+	items, ok := v.([]any)
+	if !ok {
+		return nil, t.typeError(k, "a list of strings", fmt.Sprintf("%s = [%q]", tomlKey(k), example))
+	}
+	list := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, t.typeError(k, "a list of strings", fmt.Sprintf("%s = [%q]", tomlKey(k), example))
+		}
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+// sub returns the table at k and whether it is there.
+func (t table) sub(k string) (table, bool, error) {
+	v, ok := t.raw[k]
+	if !ok {
+		return table{}, false, nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return table{}, false, t.typeError(k, "a table", "["+t.key(k)+"]")
+	}
+	return table{name: t.key(k), raw: m}, true, nil
+}
+
+func (t table) typeError(k, want, example string) error {
+	return output.NewError(output.ExitUsage,
+		fmt.Sprintf("%s: %s must be %s", File, t.key(k), want),
+		fmt.Sprintf("write %s as %s, for example %s", t.key(k), want, example))
 }
 
 // validPath accepts ~/a/b or /a/b with no empty, . or .. parts and no control
@@ -166,6 +454,72 @@ func (c *Config) Host() string {
 // the home folder, where every ssh command starts, or absolute.
 func (c *Config) Dir() string {
 	return strings.TrimPrefix(c.path, homePrefix)
+}
+
+// Pipelines lists the pipeline names in sorted order.
+func (c *Config) Pipelines() []string {
+	names := make([]string, 0, len(c.pipelines))
+	for name := range c.pipelines {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// Step returns the step called name.
+func (c *Config) Step(name string) (Step, bool) {
+	s, ok := c.steps[name]
+	return s, ok
+}
+
+// Drop is the filters.drop patterns: matching lines leave clean logs.
+func (c *Config) Drop() []*regexp.Regexp {
+	return slices.Clone(c.drop)
+}
+
+// Select returns the steps of pipeline in order. A step before from, or one
+// that only doesn't name, stays out of the run. Empty from and nil only
+// select every step.
+func (c *Config) Select(pipeline, from string, only []string) ([]Selected, error) {
+	names, ok := c.pipelines[pipeline]
+	if !ok {
+		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("%s has no pipeline %q", File, pipeline),
+			"use one of: "+strings.Join(c.Pipelines(), ", "))
+	}
+	wanted := slices.Clone(only)
+	if from != "" {
+		wanted = append(wanted, from)
+	}
+	for _, want := range wanted {
+		if !slices.Contains(names, want) {
+			return nil, output.NewError(output.ExitUsage, fmt.Sprintf("pipeline %s has no step %q", pipeline, want),
+				"use one of: "+strings.Join(names, ", "))
+		}
+	}
+	selected := make([]Selected, 0, len(names))
+	started := from == ""
+	for _, name := range names {
+		started = started || name == from
+		sel := Selected{Step: c.steps[name]}
+		switch {
+		case !started:
+			sel.Skip = "--from " + from
+		case only != nil && !slices.Contains(only, name):
+			sel.Skip = "--only " + strings.Join(only, ",")
+		}
+		selected = append(selected, sel)
+	}
+	return selected, nil
+}
+
+// ValidRun checks a run id such as r42. It ends up in file paths on the
+// server.
+func ValidRun(id string) error {
+	if runPattern.MatchString(id) {
+		return nil
+	}
+	return output.NewError(output.ExitUsage, fmt.Sprintf("%q is not a run id", id),
+		"pass a run id such as r42, or leave it out for the last run")
 }
 
 // ValidName checks a host, pipeline, step or secret name. field names what

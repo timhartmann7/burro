@@ -1,0 +1,9 @@
+burro status · show the state of a run and of each step
+
+Usage: burro status [id]
+
+Example
+  burro status r42
+
+Exit codes  0 passed · 1 tests failed · 2 server problem or runner died
+            3 still running · 4 bad flags or unknown run

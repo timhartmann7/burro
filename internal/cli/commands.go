@@ -28,8 +28,9 @@ const (
 )
 
 // treeScript writes the full tree hash to <dir>/.burro/tree through a temp
-// file, so a reader never sees half a hash.
-const treeScript = `printf '%s\n' "$2" >"$1/.burro/tree.tmp" && mv -f "$1/.burro/tree.tmp" "$1/.burro/tree"`
+// file of its own, so a reader never sees half a hash and two syncs at once
+// don't share one.
+const treeScript = `t="$1/.burro/tree.$$" && printf '%s\n' "$2" >"$t" && mv -f "$t" "$1/.burro/tree"`
 
 // doctorScript prints one "name value" line per fact doctor checks. A
 // missing tool prints an empty value; docker prints nothing when absent.
@@ -140,10 +141,10 @@ func (a *App) checks(ctx context.Context, h *hosts.Host) ([]output.Check, error)
 	if err != nil {
 		return nil, err
 	}
-	burro := output.Check{Name: "burro", OK: true, Detail: a.version}
+	burro := output.Check{Name: binaryName, OK: true, Detail: a.version}
 	if version != a.version {
 		if err := a.install(ctx, h, machine); err != nil {
-			burro = failedCheck("burro", err)
+			burro = failedCheck(binaryName, err)
 		}
 	}
 
@@ -241,7 +242,7 @@ func (a *App) exec(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"exec", "--path", proj.cfg.Dir(), "--max-lines", strconv.Itoa(maxLines)}
+	args := proj.call("exec", "--max-lines", strconv.Itoa(maxLines))
 	var stdin io.Reader
 	if file != "" {
 		dir, err := os.Getwd()
@@ -267,9 +268,7 @@ func (a *App) exec(ctx context.Context, p *parsed) error {
 		return err
 	}
 	if reply.Exec == nil {
-		return output.NewError(output.ExitServer,
-			fmt.Sprintf("host %s: the server binary sent no exec result", proj.host.Name()),
-			"run burro doctor "+proj.host.Name())
+		return noResult(proj.host, "exec")
 	}
 	if err := p.print.Exec(*reply.Exec); err != nil {
 		return err
@@ -285,35 +284,46 @@ func (a *App) sync(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	if err := proj.store.CheckRsync(ctx); err != nil {
+	s, err := a.push(ctx, proj)
+	if err != nil {
 		return err
+	}
+	s.Tree = s.Tree[:tree.ShortLen]
+	return p.print.Sync(*s)
+}
+
+// push syncs the tree to the server unless a run holds the lock there, and
+// records the full tree hash.
+func (a *App) push(ctx context.Context, proj *project) (*output.Sync, error) {
+	if err := proj.store.CheckRsync(ctx); err != nil {
+		return nil, err
 	}
 	start := time.Now()
 	hash, err := proj.repo.Hash(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	exclude, err := proj.repo.ExcludeFile(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	h, dir := proj.host, proj.cfg.Dir()
 	if err := a.connect(ctx, h); err != nil {
-		return err
+		return nil, err
 	}
-	if err := runShort(ctx, h, "mkdir", "-p", dir+"/.burro"); err != nil {
-		return err
+	if _, err := a.short(ctx, h, proj.call("prepare")...); err != nil {
+		return nil, err
 	}
 	longCtx, cancel := context.WithTimeout(ctx, longTimeout)
 	defer cancel()
 	changed, err := h.Sync(longCtx, proj.repo.Root(), dir, exclude)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := runShort(ctx, h, "sh", "-c", treeScript, "sh", dir, hash); err != nil {
-		return err
+		return nil, err
 	}
-	return p.print.Sync(output.Sync{Tree: hash[:tree.ShortLen], Changed: changed, Took: time.Since(start)})
+	return &output.Sync{Tree: hash, Changed: changed, Took: time.Since(start)}, nil
 }
 
 // runShort runs one short command on h whose output doesn't matter.

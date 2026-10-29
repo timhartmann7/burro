@@ -1,0 +1,8 @@
+burro cancel · stop a run and every process of its current step
+
+Usage: burro cancel [id]
+
+Example
+  burro cancel r42
+
+Exit codes  0 stopped · 2 server problem · 4 unknown run

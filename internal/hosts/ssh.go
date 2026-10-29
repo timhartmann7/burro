@@ -58,25 +58,33 @@ func (h *Host) Address(ctx context.Context) string {
 // Run runs argv on the host and returns its stdout. stdin may be nil. A
 // non-zero exit status is an error with exit code 2.
 func (h *Host) Run(ctx context.Context, stdin io.Reader, argv ...string) ([]byte, error) {
-	if err := h.store.prepare(); err != nil {
+	stdout := &capped{max: maxReply}
+	if err := h.Stream(ctx, stdin, stdout, argv...); err != nil {
 		return nil, err
 	}
-	stdout := &capped{max: maxReply}
+	if stdout.over {
+		return nil, output.NewError(output.ExitServer,
+			fmt.Sprintf("host %s: reply is over %d bytes", h.name, maxReply),
+			"run burro doctor "+h.name)
+	}
+	return stdout.buf, nil
+}
+
+// Stream runs argv on the host and writes its stdout to w as it arrives.
+// Errors are those of Run.
+func (h *Host) Stream(ctx context.Context, stdin io.Reader, w io.Writer, argv ...string) error {
+	if err := h.store.prepare(); err != nil {
+		return err
+	}
 	stderr := &capped{max: maxStderr}
 	cmd := h.store.command(ctx, sshTool, append(h.store.sshOptions(), h.name, commandLine(argv)))
 	cmd.Stdin = stdin
-	cmd.Stdout = stdout
+	cmd.Stdout = w
 	cmd.Stderr = stderr
-	err := cmd.Run()
-	if err == nil {
-		if stdout.over {
-			return nil, output.NewError(output.ExitServer,
-				fmt.Sprintf("host %s: reply is over %d bytes", h.name, maxReply),
-				"run burro doctor "+h.name)
-		}
-		return stdout.buf, nil
+	if err := cmd.Run(); err != nil {
+		return h.failure(ctx, sshTool, err, stderr.String())
 	}
-	return nil, h.failure(ctx, sshTool, err, stderr.String())
+	return nil
 }
 
 // failure turns a failed ssh or rsync call into an error with exit code 2
@@ -139,10 +147,10 @@ func (h *Host) sshError(ctx context.Context, stderr string) error {
 func (h *Host) manual(u, host, port string) string {
 	cmd := sshTool
 	if h.key != "" {
-		key := quote(h.key)
+		key := Quote(h.key)
 		if rel, ok := strings.CutPrefix(h.key, h.store.home+string(filepath.Separator)); ok {
 			// ~ must stay outside the quotes to expand.
-			key = "~/" + quote(rel)
+			key = "~/" + Quote(rel)
 		}
 		cmd += " -i " + key
 	}
@@ -198,7 +206,9 @@ func (h *Host) Sync(ctx context.Context, root, dir, excludeFile string) (int, er
 	}
 	// Incremental recursion waits a round trip per batch of folders, which
 	// doubles a no-change sync of a large tree on a distant server.
-	args := []string{"-az", "--no-inc-recursive", "--delete", "--itemize-changes", "--filter=:- .gitignore"}
+	// Temp files go to .burro/tmp, which --delete never touches, so two
+	// syncs at once can't delete each other's files.
+	args := []string{"-az", "--no-inc-recursive", "--delete", "--itemize-changes", "--temp-dir=.burro/tmp", "--filter=:- .gitignore"}
 	if excludeFile != "" {
 		args = append(args, "--exclude-from="+excludeFile)
 	}

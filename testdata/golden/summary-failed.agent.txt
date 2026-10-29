@@ -1,0 +1,8 @@
+r42 verify · tree 5530df9 · 41m · exit 1
+install     skip     pnpm-lock.yaml unchanged
+unit        ok       3m10s
+e2e         FAIL     22m
+    1 failed
+      tests/site.spec.ts:252 cohorts are listed
+more: burro log r42 --step e2e
+lighthouse  not run

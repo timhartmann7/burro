@@ -1,0 +1,11 @@
+burro wait · wait for a run to end, then print its summary
+
+Usage: burro wait [id] [--timeout 60m]
+
+  --timeout d    stop waiting after this long, the run goes on (default 60m)
+
+Example
+  burro wait r42 --timeout 30m
+
+Exit codes  0 passed · 1 tests failed · 2 server problem or runner died
+            3 still running, wait again · 4 bad flags or unknown run

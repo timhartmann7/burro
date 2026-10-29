@@ -83,11 +83,11 @@ go mod edit -require="golang.org/x/tools@$(awk '$1 == "golang.org/x/tools" { pri
 sort -u -o go.sum go.sum tools/go.sum
 expect "module outside the allowlist" "not allowed from list 'module'" mk lint
 
-# agent imports no layer 1 package, so the planted import makes no cycle that
-# would fail type checking before depguard runs.
-cat >internal/config/planted.go <<'EOF'
-// Package config reaches from layer 1 up to layer 2.
-package config
+# The executor never reaches serverbin, so the planted import makes no cycle
+# that would fail type checking before depguard runs.
+cat >internal/serverbin/planted.go <<'EOF'
+// Package serverbin reaches from layer 1 up to layer 2.
+package serverbin
 
 import "github.com/timhartmann7/burro/internal/agent"
 

@@ -28,6 +28,8 @@ const (
 	// executor is the server binary, relative to the home folder where every
 	// ssh command starts.
 	executor = ".burro/bin/burro"
+	// maxReply caps one reply line, matching what the executor stays under.
+	maxReply = 1 << 20
 )
 
 // probeScript prints the server's architecture and the version line of its
@@ -74,6 +76,11 @@ func (a *App) project(ctx context.Context) (*project, error) {
 	return &project{repo: repo, cfg: cfg, store: store, host: host}, nil
 }
 
+// call is the argument list of an executor call on the project folder.
+func (p *project) call(action string, args ...string) []string {
+	return append([]string{action, "--path", p.cfg.Dir()}, args...)
+}
+
 func (a *App) store() (*hosts.Store, error) {
 	return hosts.NewStore(a.getenv("HOME"), a.env)
 }
@@ -91,7 +98,7 @@ func (a *App) probe(ctx context.Context, h *hosts.Host) (machine, version string
 	machine = strings.TrimSpace(lines[len(lines)-1])
 	if len(lines) > 1 {
 		// The version line reads "burro <version> <os>/<arch>".
-		if fields := strings.Fields(lines[0]); len(fields) == 3 && fields[0] == "burro" {
+		if fields := strings.Fields(lines[0]); len(fields) == 3 && fields[0] == binaryName {
 			version = fields[1]
 		}
 	}
@@ -125,22 +132,98 @@ func (a *App) connect(ctx context.Context, h *hosts.Host) error {
 // call runs one agent call on the host and returns its reply. A failure the
 // executor reports becomes this command's error.
 func (a *App) call(ctx context.Context, h *hosts.Host, stdin io.Reader, args ...string) (*agent.Reply, error) {
-	out, err := h.Run(ctx, stdin, append([]string{executor, "agent"}, args...)...)
+	reply, err := exchange(ctx, h, stdin, nil, args...)
 	if err != nil {
 		return nil, err
 	}
+	return reply, replyError(h, reply)
+}
+
+// short is a call without stdin that must finish within shortTimeout.
+func (a *App) short(ctx context.Context, h *hosts.Host, args ...string) (*agent.Reply, error) {
+	ctx, cancel := context.WithTimeout(ctx, shortTimeout)
+	defer cancel()
+	return a.call(ctx, h, nil, args...)
+}
+
+// exchange runs one agent call and parses its last line as the reply.
+// Earlier lines are progress replies, handed to progress as they arrive.
+// The error is about reaching the executor; what the executor reports
+// stays in the reply.
+func exchange(ctx context.Context, h *hosts.Host, stdin io.Reader, progress func(output.Progress), args ...string) (*agent.Reply, error) {
+	lines := &replyLines{progress: progress}
+	if err := h.Stream(ctx, stdin, lines, append([]string{executor, agentCommand}, args...)...); err != nil {
+		return nil, err
+	}
 	var reply agent.Reply
-	if err := json.Unmarshal(out, &reply); err != nil {
+	if err := json.Unmarshal(lines.reply(), &reply); err != nil || lines.over {
 		return nil, output.NewError(output.ExitServer,
 			fmt.Sprintf("host %s: the server binary sent a broken reply", h.Name()),
 			"run burro doctor "+h.Name())
 	}
-	if f := reply.Error; f != nil {
-		code := output.Code(f.Code)
-		if code < output.ExitFailed || code > output.ExitBusy {
-			code = output.ExitServer
-		}
-		return nil, output.NewError(code, fmt.Sprintf("host %s: %s", h.Name(), f.Message), f.Fix)
-	}
 	return &reply, nil
+}
+
+// replyError is the failure the executor put into reply, as this command's
+// error with the same exit code and fix line.
+func replyError(h *hosts.Host, reply *agent.Reply) error {
+	f := reply.Error
+	if f == nil {
+		return nil
+	}
+	code := output.Code(f.Code)
+	if code < output.ExitFailed || code > output.ExitBusy {
+		code = output.ExitServer
+	}
+	return output.NewError(code, fmt.Sprintf("host %s: %s", h.Name(), f.Message), f.Fix)
+}
+
+// replyLines splits executor output into lines as it arrives. Each line is
+// capped like a whole reply.
+type replyLines struct {
+	progress func(output.Progress)
+	partial  []byte
+	last     []byte
+	over     bool
+}
+
+func (r *replyLines) Write(p []byte) (int, error) {
+	n := len(p)
+	for {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			r.add(p)
+			return n, nil
+		}
+		r.add(p[:i])
+		r.line()
+		p = p[i+1:]
+	}
+}
+
+func (r *replyLines) add(p []byte) {
+	if len(r.partial)+len(p) > maxReply {
+		r.over = true
+		return
+	}
+	r.partial = append(r.partial, p...)
+}
+
+func (r *replyLines) line() {
+	line := r.partial
+	r.partial = nil
+	var reply agent.Reply
+	if r.progress != nil && json.Unmarshal(line, &reply) == nil && reply.Progress != nil {
+		r.progress(*reply.Progress)
+		return
+	}
+	r.last = line
+}
+
+// reply is the last line, which may lack its newline.
+func (r *replyLines) reply() []byte {
+	if len(r.partial) > 0 {
+		r.line()
+	}
+	return r.last
 }
