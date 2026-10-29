@@ -19,6 +19,7 @@ const hintTail = 200
 type Palette interface {
 	OK(s string) string
 	Fail(s string) string
+	Skip(s string) string
 }
 
 // Printer writes one command result to stdout as text or as one JSON object.

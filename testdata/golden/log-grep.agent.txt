@@ -1,0 +1,6 @@
+r2 e2e · 3 matches
+x
+cohorts
+--
+cohorts
++1 more match: burro log r2 --step e2e --grep cohorts --tail 120

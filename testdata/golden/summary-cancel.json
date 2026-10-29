@@ -1,0 +1,1 @@
+{"run":"r8","pipeline":"default","tree":"5530df9","state":"cancelled","exit":1,"seconds":12,"reason":"cancelled","steps":[{"name":"test","state":"fail","seconds":11,"detail":"cancelled"},{"name":"lint","state":"not run","seconds":0}]}
