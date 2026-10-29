@@ -46,10 +46,13 @@ func ready(t *testing.T, tables string, files map[string]string) *world {
 }
 
 // pidsScript prints the pids whose command line contains $1, leaving out
-// itself. Zombies have an empty command line and never match.
+// itself. Zombies have an empty command line and never match. A process may
+// exit between the glob and the read; the braces keep the shell's own
+// "cannot open" out of the output, which a plain 2>/dev/null after the
+// input redirect doesn't.
 const pidsScript = `for p in /proc/[0-9]*; do
   [ "${p#/proc/}" = "$$" ] && continue
-  c=$(tr '\0' ' ' <"$p/cmdline" 2>/dev/null) || continue
+  c=$( { tr '\0' ' ' <"$p/cmdline"; } 2>/dev/null) || continue
   case "$c" in *"$1"*) echo "${p#/proc/}" ;; esac
 done; true`
 
