@@ -80,6 +80,13 @@ func runResults() map[string]func(p *output.Printer) error {
 		"cleaned-nothing": func(p *output.Printer) error {
 			return p.Cleaned(&output.Cleaned{Run: "r3"})
 		},
+		"init": func(p *output.Printer) error {
+			return p.Init([]output.InitFile{
+				{Name: "burro.toml", Change: output.Created},
+				{Name: "CLAUDE.md", Change: output.Updated, Detail: "rules for your agent"},
+				{Name: ".gitignore", Change: output.Updated, Detail: ".burro/"},
+			})
+		},
 		"log-tail": func(p *output.Printer) error {
 			return p.Log(&output.Log{Run: "r2", Step: stepE2E, Lines: []string{"a", "", "b"}, Hidden: 940, More: "burro log r2 --step e2e --tail 120"})
 		},

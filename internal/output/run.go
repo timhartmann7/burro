@@ -385,6 +385,49 @@ func (p *Printer) Cleaned(c *Cleaned) error {
 	return p.write(c.Run + " · removed " + list + "\n")
 }
 
+// What init did to a file.
+const (
+	Created   = "created"
+	Updated   = "updated"
+	Unchanged = "unchanged"
+)
+
+// InitFile is one file init looked at: what it did and what changed.
+type InitFile struct {
+	Name   string `json:"file"`
+	Change string `json:"change"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// Init prints one line per file: what init did, the file, what changed.
+func (p *Printer) Init(files []InitFile) error {
+	if p.json {
+		return p.writeJSON(struct {
+			Files []InitFile `json:"files"`
+		}{files})
+	}
+	width := 0
+	for _, f := range files {
+		width = max(width, len(f.Name))
+	}
+	var b strings.Builder
+	for _, f := range files {
+		line := fmt.Sprintf("%-*s  %-*s   %s", len(Unchanged), f.Change, width, f.Name, f.Detail)
+		b.WriteString(strings.TrimRight(line, " ") + "\n")
+	}
+	return p.write(b.String())
+}
+
+// Rules prints the agent rules block as it is, or as one JSON object.
+func (p *Printer) Rules(block string) error {
+	if p.json {
+		return p.writeJSON(struct {
+			Block string `json:"block"`
+		}{block})
+	}
+	return p.write(block)
+}
+
 // Log is the clean log of one step, or the matches of --grep in it.
 type Log struct {
 	Run     string   `json:"run"`

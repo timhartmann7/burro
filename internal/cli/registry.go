@@ -236,6 +236,23 @@ func (a *App) registry() []command {
 			run: a.hostAdd,
 		},
 		{
+			name:    "init",
+			summary: "set up this project and the agent rules",
+			group:   groupSetup,
+			about:   "create burro.toml, write the agent rules block, ignore .burro/",
+			usage:   []string{"init [--agents-file path] [--print]"},
+			flags: []flagSpec{
+				{name: "agents-file", arg: "path", usage: "write the rules here, not into AGENTS.md or CLAUDE.md"},
+				{name: "print", usage: "print the rules block and write nothing"},
+			},
+			example: "burro init --agents-file docs/AGENTS.md",
+			exits: []exitLabel{
+				{output.ExitPassed, "set up"},
+				{output.ExitUsage, "not a git repository or bad flags"},
+			},
+			run: a.initProject,
+		},
+		{
 			name:    "run",
 			brief:   "run [pipeline]",
 			summary: "sync the code and start a run, returns at once",

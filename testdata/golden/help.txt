@@ -4,6 +4,7 @@ Usage: burro <command> [flags]
 
 Set up (once)
   host add <name> <user@host>   add a server
+  init                          set up this project and the agent rules
 
 Run tests
   run [pipeline]                sync the code and start a run, returns at once
