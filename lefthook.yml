@@ -1,0 +1,30 @@
+# Git hooks. Install once per clone: go tool -modfile=tools/go.mod lefthook install
+lefthook: go tool -modfile=tools/go.mod lefthook
+
+pre-commit:
+  jobs:
+    - name: go format
+      glob: "*.go"
+      run: make -s .bin/golangci-lint >/dev/null && .bin/golangci-lint fmt --diff {staged_files}
+    - name: go lint
+      glob: "*.go"
+      run: >-
+        make -s .bin/golangci-lint >/dev/null &&
+        .bin/golangci-lint run $(for f in {staged_files}; do dirname "$f"; done | sort -u | sed 's|^|./|')
+    - name: shell
+      glob: "*.sh"
+      run: >-
+        make -s .bin/shellcheck >/dev/null &&
+        .bin/shellcheck {staged_files} &&
+        go tool -modfile=tools/go.mod shfmt -d {staged_files}
+    - name: workflows
+      glob: ".github/workflows/*.yml"
+      run: >-
+        make -s .bin/shellcheck .bin/zizmor >/dev/null &&
+        go tool -modfile=tools/go.mod actionlint -shellcheck=.bin/shellcheck {staged_files} &&
+        .bin/zizmor --no-progress {staged_files}
+
+commit-msg:
+  jobs:
+    - name: commit message
+      run: scripts/commit-msg.sh {1}
