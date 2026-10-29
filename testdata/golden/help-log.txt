@@ -1,0 +1,13 @@
+burro log · print the clean log of one step: no ANSI codes, no binary bytes
+
+Usage: burro log [id] --step s [--grep re] [--tail 60] [--context 5]
+
+  --step s       step whose log to print
+  --grep re      print only matching lines with context, Go regexp
+  --tail n       most lines to print (default 60)
+  --context n    lines around each match (default 5)
+
+Example
+  burro log r42 --step e2e --grep login
+
+Exit codes  0 printed · 2 server problem · 4 bad flags or unknown step

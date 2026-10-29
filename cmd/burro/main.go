@@ -12,6 +12,6 @@ import (
 var version string
 
 func main() {
-	app := cli.New(os.Stdin, os.Stdout, os.Environ(), version)
+	app := cli.New(os.Stdin, os.Stdout, os.Stderr, os.Environ(), version)
 	os.Exit(output.Report(os.Stderr, app.Run(os.Args[1:])))
 }

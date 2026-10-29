@@ -23,8 +23,8 @@ func TestQuote(t *testing.T) {
 		"--max-lines":      "--max-lines",
 	}
 	for in, want := range tests {
-		if got := quote(in); got != want {
-			t.Errorf("quote(%q) = %s, want %s", in, got, want)
+		if got := Quote(in); got != want {
+			t.Errorf("Quote(%q) = %s, want %s", in, got, want)
 		}
 	}
 	if got := commandLine([]string{"printf", "%s\n", "a b"}); got != `printf '%s`+"\n"+`' 'a b'` {

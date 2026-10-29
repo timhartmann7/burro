@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -26,19 +27,32 @@ const (
 	flagMaxLines = "max-lines"
 	gitignore    = ".gitignore"
 	someTarget   = "u@h"
+	argRun       = "run"
+	argWait      = "wait"
+	argStatus    = "status"
+	argE2E       = "e2e"
+	argCancel    = "cancel"
+	argStep      = "--step"
+	argOnly      = "--only"
+	argTimeout   = "--timeout"
+	argNope      = "nope"
+	argBad       = "Bad"
+	argVerify    = "verify"
+	flagJSON     = "json"
+	tomlFile     = "burro.toml"
 )
 
-// acceptance: S1-19
+// acceptance: S1-19 S2-18
 func TestCommandHelp(t *testing.T) {
-	app := New(nil, &strings.Builder{}, nil, "")
-	if len(app.commands) != 5 {
-		t.Fatalf("%d commands, want the five of S1", len(app.commands))
+	app := New(nil, &strings.Builder{}, io.Discard, nil, "")
+	if len(app.commands) != 10 {
+		t.Fatalf("%d commands, want the five of S1 and the five of S2", len(app.commands))
 	}
 	for i := range app.commands {
 		c := &app.commands[i]
 		t.Run(c.name, func(t *testing.T) {
 			var stdout strings.Builder
-			a := New(nil, &stdout, nil, "")
+			a := New(nil, &stdout, io.Discard, nil, "")
 			if err := a.Run(append(strings.Fields(c.name), "--help")); err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +98,7 @@ func checkExample(t *testing.T, a *App, c *command) {
 }
 
 func TestParse(t *testing.T) {
-	app := New(nil, &strings.Builder{}, nil, "")
+	app := New(nil, &strings.Builder{}, io.Discard, nil, "")
 	tests := []struct {
 		args  []string
 		cmd   string
@@ -92,14 +106,20 @@ func TestParse(t *testing.T) {
 		flags map[string]string
 	}{
 		{args: []string{argHost, argAdd, "a", someTarget, "-i", "k", "--force"}, cmd: "host add", pos: []string{"a", someTarget}, flags: map[string]string{"i": "k", "force": flagSet}},
-		{args: []string{argHost, argAdd, "-i=k", "a", argJSON, someTarget}, cmd: "host add", pos: []string{"a", someTarget}, flags: map[string]string{"i": "k", "json": flagSet}},
+		{args: []string{argHost, argAdd, "-i=k", "a", argJSON, someTarget}, cmd: "host add", pos: []string{"a", someTarget}, flags: map[string]string{"i": "k", flagJSON: flagSet}},
 		{args: []string{argExec, "ls", "-la", argJSON, "--help"}, cmd: argExec, pos: []string{"ls", "-la", argJSON, "--help"}, flags: map[string]string{flagMaxLines: "60"}},
 		{args: []string{argExec, argMaxLines, "5", "--", argJSON, "x"}, cmd: argExec, pos: []string{argJSON, "x"}, flags: map[string]string{flagMaxLines: "5"}},
-		{args: []string{argExec, argJSON, "--", "ls", "--", "-"}, cmd: argExec, pos: []string{"ls", "--", "-"}, flags: map[string]string{"json": flagSet, flagMaxLines: "60"}},
+		{args: []string{argExec, argJSON, "--", "ls", "--", "-"}, cmd: argExec, pos: []string{"ls", "--", "-"}, flags: map[string]string{flagJSON: flagSet, flagMaxLines: "60"}},
 		{args: []string{argExec, "--file", "s.sh", "a", "--b"}, cmd: argExec, pos: []string{"a", "--b"}, flags: map[string]string{"file": "s.sh", flagMaxLines: "60"}},
 		{args: []string{argDoctor, argMode, humanMode, "vps1"}, cmd: argDoctor, pos: []string{"vps1"}, flags: map[string]string{"mode": humanMode}},
 		{args: []string{argDoctor, "-"}, cmd: argDoctor, pos: []string{"-"}, flags: map[string]string{}},
 		{args: []string{argSync, "--mode=agent"}, cmd: argSync, flags: map[string]string{"mode": agentMode}},
+		{args: []string{argRun}, cmd: argRun, flags: map[string]string{}},
+		{args: []string{argRun, argVerify, argOnly, "a,b", "--from=e2e"}, cmd: argRun, pos: []string{argVerify}, flags: map[string]string{"only": "a,b", "from": argE2E}},
+		{args: []string{argWait, "r3"}, cmd: argWait, pos: []string{"r3"}, flags: map[string]string{"timeout": "60m"}},
+		{args: []string{cmdLog, argStep, argE2E, "--grep", "a b", "r2"}, cmd: cmdLog, pos: []string{"r2"}, flags: map[string]string{"step": argE2E, "grep": "a b", "tail": "60", "context": "5"}},
+		{args: []string{argStatus, argJSON}, cmd: argStatus, flags: map[string]string{flagJSON: flagSet}},
+		{args: []string{argCancel, "r1"}, cmd: argCancel, pos: []string{"r1"}, flags: map[string]string{}},
 	}
 	for _, tt := range tests {
 		c, rest := app.find(tt.args)
@@ -137,12 +157,30 @@ func TestUsageErrors(t *testing.T) {
 		{argExec, argMaxLines, "x", "ls"},
 		{argExec},
 		{argExec, argJSON},
-		{argHost, argAdd, "Bad", someTarget},
-		{argDoctor, "Bad"},
+		{argHost, argAdd, argBad, someTarget},
+		{argDoctor, argBad},
 		{argHost},
+		{argRun, "a", "b"},
+		{argRun, "--from"},
+		{argWait, "r1", "r2"},
+		{argWait, argNope},
+		{argWait, argTimeout, "soon"},
+		{argWait, argTimeout, "0s"},
+		{argWait, argTimeout, "-5m"},
+		{argStatus, "R1"},
+		{argStatus, "r1", "r2"},
+		{cmdLog},
+		{cmdLog, "r1"},
+		{cmdLog, argStep, argBad},
+		{cmdLog, argStep, argE2E, "--tail", "0"},
+		{cmdLog, argStep, argE2E, "--tail", "x"},
+		{cmdLog, argStep, argE2E, "--context", "-1"},
+		{cmdLog, argStep, argE2E, "--grep", "("},
+		{cmdLog, argStep, argE2E, "r0"},
+		{argCancel, "../r1"},
 	} {
 		var stdout, stderr strings.Builder
-		err := New(nil, &stdout, nil, "").Run(args)
+		err := New(nil, &stdout, io.Discard, nil, "").Run(args)
 		if code := output.Report(&stderr, err); code != int(output.ExitUsage) {
 			t.Errorf("%q: exit %d, want 4: %s", args, code, stderr.String())
 			continue
@@ -156,13 +194,13 @@ func TestUsageErrors(t *testing.T) {
 
 func TestAgentDispatch(t *testing.T) {
 	var stdout strings.Builder
-	if err := New(strings.NewReader(""), &stdout, []string{"HOME=/nonexistent"}, "").Run([]string{agentMode, "nope"}); err != nil {
+	if err := New(strings.NewReader(""), &stdout, io.Discard, []string{"HOME=/nonexistent"}, "").Run([]string{agentMode, argNope}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), `"error"`) {
 		t.Fatalf("agent reply %q", stdout.String())
 	}
-	if strings.Contains(New(nil, &stdout, nil, "").help(), "\n  agent") {
+	if strings.Contains(New(nil, &stdout, io.Discard, nil, "").help(), "\n  agent") {
 		t.Fatal("help lists the internal agent command")
 	}
 }
@@ -170,7 +208,7 @@ func TestAgentDispatch(t *testing.T) {
 func TestNoHome(t *testing.T) {
 	for _, args := range [][]string{{argHost, "ls"}, {argHost, argAdd, "a", someTarget}, {argDoctor, "a"}} {
 		var stderr strings.Builder
-		err := New(nil, &strings.Builder{}, []string{"PATH=/usr/bin"}, "").Run(args)
+		err := New(nil, &strings.Builder{}, io.Discard, []string{"PATH=/usr/bin"}, "").Run(args)
 		var coded *output.Error
 		if !errors.As(err, &coded) || coded.Code() != output.ExitServer {
 			t.Errorf("%q: got %v", args, err)

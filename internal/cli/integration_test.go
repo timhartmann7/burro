@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,7 @@ type world struct {
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
 	srv := testutil.StartServer(t)
-	all := map[string]string{"burro.toml": hostTOML}
+	all := map[string]string{tomlFile: hostTOML}
 	for k, v := range files {
 		all[k] = v
 	}
@@ -77,10 +78,15 @@ func (b builtBinaries) ForMachine(machine string) ([]byte, error) {
 func (w *world) burro(version string, args ...string) testutil.Result {
 	w.t.Helper()
 	var stdout, stderr strings.Builder
-	a := New(strings.NewReader(""), &stdout, w.env, version)
-	a.binaries = builtBinaries{w: w, version: version}
-	code := output.Report(&stderr, a.Run(args))
+	code := w.burroTo(version, &stdout, &stderr, args...)
 	return testutil.Result{Code: code, Stdout: stdout.String(), Stderr: stderr.String()}
+}
+
+// burroTo is burro with the writers of the caller's choice.
+func (w *world) burroTo(version string, stdout, stderr io.Writer, args ...string) int {
+	a := New(strings.NewReader(""), stdout, stderr, w.env, version)
+	a.binaries = builtBinaries{w: w, version: version}
+	return output.Report(stderr, a.Run(args))
 }
 
 func (w *world) must(version string, args ...string) string {
@@ -333,7 +339,7 @@ func TestSyncReflectsChanges(t *testing.T) {
 		"new name.txt":        "moved",
 		"new uncommitted.txt": "new",
 		"dir with space/file \u00e9 \U0001F642.txt": "unicode",
-		"burro.toml": strings.TrimSuffix(hostTOML, "\n"),
+		tomlFile: strings.TrimSuffix(hostTOML, "\n"),
 	}
 	got := w.serverFiles(appDir)
 	if len(got) != len(want) {
@@ -553,7 +559,7 @@ func TestMissingServerBinary(t *testing.T) {
 	w.addHost(v1)
 	w.must(v1, argSync)
 	var stdout, stderr strings.Builder
-	a := New(strings.NewReader(""), &stdout, w.env, v2)
+	a := New(strings.NewReader(""), &stdout, io.Discard, w.env, v2)
 	a.binaries = missingBinaries{}
 	if code := output.Report(&stderr, a.Run([]string{argExec, "true"})); code != 2 ||
 		!strings.Contains(stderr.String(), "no server binary") || !strings.Contains(stderr.String(), "\nfix: ") {

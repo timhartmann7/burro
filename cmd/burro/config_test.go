@@ -63,6 +63,11 @@ func TestBadConfigNeverTouchesNetwork(t *testing.T) {
 				{"exec", "--", "true"},
 				{"exec", "--file", "check.sh"},
 				{"doctor"},
+				{"run"},
+				{"wait"},
+				{"status"},
+				{"log", "--step", "test"},
+				{"cancel"},
 			} {
 				checkRefused(t, testutil.RunBurroIn(t, bin, repo, env, args...), tt.field)
 				if _, err := os.Stat(record); !errors.Is(err, os.ErrNotExist) {

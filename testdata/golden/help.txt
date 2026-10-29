@@ -5,11 +5,23 @@ Usage: burro <command> [flags]
 Set up (once)
   host add <name> <user@host>   add a server
 
+Run tests
+  run [pipeline]                sync the code and start a run, returns at once
+  wait                          wait for the run, then print a short summary
+  status                        how the run is going
+  log --step <name>             clean log of one step, --grep to search it
+  cancel                        stop the run
+
 Server
   exec -- <command>             run one command on the server
   sync                          copy the code to the server without a run
   doctor                        check that the server is ready
   host ls                       list your servers
+
+Typical loop
+  burro run           start
+  burro wait          Ctrl+C is safe, the run keeps going
+  burro log --step e2e --grep login
 
 Exit codes  0 passed · 1 tests failed · 2 server problem · 3 still running
             4 bad config or flags · 5 another run is active
