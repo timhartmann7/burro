@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"strings"
@@ -14,11 +15,16 @@ import (
 // image is the test server's base image, the one image tests may run.
 const image = "debian:stable-slim@sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04"
 
+// dockerCmd returns what docker prints on stdout. stderr carries pull
+// progress when the image isn't there yet, so it only explains failures.
 func dockerCmd(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := exec.CommandContext(context.Background(), "docker", args...).CombinedOutput()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(context.Background(), "docker", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, stderr.String())
 	}
 	return strings.TrimSpace(string(out))
 }

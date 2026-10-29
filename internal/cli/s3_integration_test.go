@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -41,12 +42,17 @@ func serverKey(dir, id string) string {
 	return report.Open("/home/burro/" + dir).Key(id)
 }
 
-// hostDocker runs docker against the daemon the docker server shares.
+// hostDocker runs docker against the daemon the docker server shares and
+// returns its stdout. stderr carries pull progress when the image isn't
+// there yet, so it only explains failures.
 func hostDocker(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := exec.CommandContext(context.Background(), "docker", args...).CombinedOutput()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(context.Background(), "docker", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, stderr.String())
 	}
 	return strings.TrimSpace(string(out))
 }
