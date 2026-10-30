@@ -6,11 +6,18 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/timhartmann7/burro/internal/output"
 	"github.com/timhartmann7/burro/internal/testutil"
 	"github.com/timhartmann7/burro/internal/tree"
+)
+
+const (
+	gitignore = ".gitignore"
+	srcPkg    = "package src\n"
 )
 
 func write(t *testing.T, root, name, content string) {
@@ -28,12 +35,12 @@ func write(t *testing.T, root, name, content string) {
 func TestHashMatchesCleanCopy(t *testing.T) {
 	ctx := context.Background()
 	root := testutil.GitRepo(t, map[string]string{
-		".gitignore":    "node_modules/\n*.log\n",
+		gitignore:       "node_modules/\n*.log\n",
 		"a.txt":         "a\n",
 		"gone.txt":      "bye\n",
 		"old name.txt":  "renamed\n",
 		"src/main.go":   "package main\n",
-		"src/staged.go": "package src\n",
+		"src/staged.go": srcPkg,
 	})
 	// Unstaged, staged, new, deleted, renamed and ignored changes at once.
 	write(t, root, "a.txt", "a changed\n")
@@ -75,7 +82,7 @@ func TestHashMatchesCleanCopy(t *testing.T) {
 
 	// A clean copy: a fresh repository with the same files, staged by git.
 	clean := testutil.GitRepo(t, map[string]string{
-		".gitignore":     "node_modules/\n*.log\n",
+		gitignore:        "node_modules/\n*.log\n",
 		"a.txt":          "a changed\n",
 		"new name.txt":   "renamed\n",
 		"new é file.txt": "new\n",
@@ -167,6 +174,71 @@ func TestHashBrokenIndex(t *testing.T) {
 	_, err = repo.Hash(ctx)
 	var coded *output.Error
 	if !errors.As(err, &coded) || coded.Code() != output.ExitServer {
+		t.Fatalf("got %v, want exit 2", err)
+	}
+}
+
+func TestIgnored(t *testing.T) {
+	ctx := context.Background()
+	root := testutil.GitRepo(t, map[string]string{
+		gitignore:  "build/\n*.log\n!keep.log\nnode_modules/\n",
+		"keep.log": "kept by a negation\n",
+		"src/a.go": "package src\n",
+	})
+	for _, name := range []string{"build/tracked.txt", "deep/build/sub/tracked.txt", "tracked.log"} {
+		write(t, root, name, "tracked\n")
+		testutil.Git(t, root, "add", "-f", name)
+	}
+	for _, name := range []string{"build/junk.o", "debug.log", " lead.log", "node_modules/x/index.js", "src/new.log"} {
+		write(t, root, name, "ignored\n")
+	}
+	repo, err := tree.Open(ctx, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, folders, err := repo.Ignored(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A whole ignored folder is one path; a folder with tracked files is not.
+	wantPaths := []string{" lead.log", "build/junk.o", "debug.log", "node_modules/", "src/new.log"}
+	wantFolders := []string{"build/", "deep/build/", "deep/build/sub/"}
+	if !slices.Equal(paths, wantPaths) || !slices.Equal(folders, wantFolders) {
+		t.Fatalf("Ignored = %q, %q; want %q, %q", paths, folders, wantPaths, wantFolders)
+	}
+}
+
+func TestIgnoredNothing(t *testing.T) {
+	ctx := context.Background()
+	root := testutil.GitRepo(t, map[string]string{gitignore: "*.log\n", "src/a.go": srcPkg})
+	repo, err := tree.Open(ctx, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths, folders, err := repo.Ignored(ctx); err != nil || paths != nil || folders != nil {
+		t.Fatalf("Ignored = %q, %q, %v", paths, folders, err)
+	}
+	// A tracked file that matches a rule, in a folder no rule matches.
+	write(t, root, "src/tracked.log", "x\n")
+	testutil.Git(t, root, "add", "-f", "src/tracked.log")
+	if paths, folders, err := repo.Ignored(ctx); err != nil || paths != nil || folders != nil {
+		t.Fatalf("with a tracked ignored file: %q, %q, %v", paths, folders, err)
+	}
+}
+
+func TestIgnoredBrokenIndex(t *testing.T) {
+	ctx := context.Background()
+	root := testutil.GitRepo(t, map[string]string{"a": "a"})
+	repo, err := tree.Open(ctx, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "index"), []byte("garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = repo.Ignored(ctx)
+	var coded *output.Error
+	if !errors.As(err, &coded) || coded.Code() != output.ExitServer || !strings.Contains(err.Error(), "git ls-files") {
 		t.Fatalf("got %v, want exit 2", err)
 	}
 }
