@@ -84,6 +84,15 @@ func TestModeColors(t *testing.T) {
 	if got := agent.Skip("skip"); got != "skip" {
 		t.Fatalf("agent Skip = %q", got)
 	}
+	if got := m.Title("Get started"); got != "\x1b[1mGet started\x1b[0m" {
+		t.Fatalf("Title = %q", got)
+	}
+	if got := m.Command("burro init"); got != "\x1b[34mburro init\x1b[0m" {
+		t.Fatalf("Command = %q", got)
+	}
+	if got := agent.Title("Get started") + agent.Command("burro init"); got != "Get startedburro init" {
+		t.Fatalf("agent Title and Command = %q", got)
+	}
 }
 
 // Without color a person still reads the call, so progress stays on.

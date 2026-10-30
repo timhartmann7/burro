@@ -41,7 +41,14 @@ func (a *App) initProject(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	return p.print.Init(files)
+	if err := p.print.Init(files); err != nil {
+		return err
+	}
+	if p.human {
+		a.note(`next: open your agent here and say "fill in burro.toml and run the tests with burro"`+"\n",
+			"      or edit it yourself: burro help config\n")
+	}
+	return nil
 }
 
 // onlyHost is the one host burro knows, or empty when there are none or

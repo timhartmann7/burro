@@ -9,13 +9,16 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/timhartmann7/burro/internal/agent"
 	"github.com/timhartmann7/burro/internal/mode"
 	"github.com/timhartmann7/burro/internal/output"
 	"github.com/timhartmann7/burro/internal/runner"
 	"github.com/timhartmann7/burro/internal/serverbin"
+	"github.com/timhartmann7/burro/internal/update"
 )
 
 // helpWidth is the widest line any help screen may print.
@@ -59,7 +62,11 @@ type App struct {
 	version  string
 	terminal bool
 	binaries serverBinaries
-	commands []command
+	// executable is the path of the running binary, for the install method.
+	executable func() (string, error)
+	// latestAPI names the latest release for the version check.
+	latestAPI string
+	commands  []command
 }
 
 // New returns the app. stderr gets only what a human reads beside the
@@ -69,13 +76,15 @@ type App struct {
 func New(stdin io.Reader, stdout, stderr io.Writer, env []string, linkedVersion string) *App {
 	version := resolveVersion(linkedVersion)
 	a := &App{
-		stdin:    stdin,
-		stdout:   stdout,
-		stderr:   stderr,
-		env:      env,
-		version:  version,
-		terminal: isTerminal(stdout),
-		binaries: serverbin.New(serverbin.Embedded(), version, serverbin.ReleaseBase),
+		stdin:      stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		env:        env,
+		version:    version,
+		terminal:   isTerminal(stdout),
+		binaries:   serverbin.New(serverbin.Embedded(), version, serverbin.ReleaseBase),
+		executable: os.Executable,
+		latestAPI:  update.LatestRelease,
 	}
 	a.commands = a.registry()
 	return a
@@ -104,14 +113,18 @@ func (a *App) getenv(name string) string {
 
 // Run executes the command named by args.
 func (a *App) Run(args []string) error {
-	if len(args) == 0 || args[0] == "--help" {
-		return a.write(a.help())
+	if len(args) == 0 {
+		return a.bare()
 	}
-	switch args[0] {
-	case "--version":
-		return a.write(fmt.Sprintf("burro %s %s/%s\n", a.version, runtime.GOOS, runtime.GOARCH))
-	case agentCommand:
+	switch {
+	case args[0] == "--help":
+		return a.write(a.help())
+	case args[0] == "--version":
+		return a.write(fmt.Sprintf("burro %s %s/%s (%s)\n", a.version, runtime.GOOS, runtime.GOARCH, a.method()))
+	case args[0] == agentCommand:
 		return a.agent(args[1:])
+	case slices.Equal(args, []string{"help", "config"}):
+		return a.write(configHelp)
 	}
 	c, rest := a.find(args)
 	if c == nil {
@@ -132,7 +145,55 @@ func (a *App) Run(args []string) error {
 	}
 	p.print = output.NewPrinter(a.stdout, p.flags["json"] == flagSet, m)
 	p.human = m.Human()
-	return c.run(context.Background(), p)
+	err = c.run(context.Background(), p)
+	if p.human && !update.Off(a.getenv) {
+		if st := a.state(); st != nil {
+			a.note(st.Check(context.Background(), a.latestAPI, a.version, a.method()))
+		}
+	}
+	return err
+}
+
+// bare is burro with no arguments: the welcome for a human who has no host
+// yet, the help for everyone else.
+func (a *App) bare() error {
+	m, err := mode.New("", a.getenv, a.terminal)
+	if err != nil || !m.Human() {
+		return a.write(a.help())
+	}
+	if store, err := a.store(); err == nil {
+		if list, err := store.List(); err == nil && len(list) > 0 {
+			return a.write(a.help())
+		}
+	}
+	return a.write(a.welcome(m))
+}
+
+// method is how this binary was installed.
+func (a *App) method() update.Method {
+	exe, err := a.executable()
+	if err != nil {
+		return update.Script
+	}
+	return update.Detect(exe, a.getenv)
+}
+
+// state is ~/.burro/state.json, or nil without a usable HOME: the version
+// check and the star request are extras that never fail a command.
+func (a *App) state() *update.State {
+	st, err := update.New(a.getenv("HOME"), time.Now)
+	if err != nil {
+		return nil
+	}
+	return st
+}
+
+// note writes lines only a human reads to stderr: hints, the update notice,
+// the star request. A failed write costs only the note.
+func (a *App) note(lines ...string) {
+	for _, l := range lines {
+		_, _ = io.WriteString(a.stderr, l)
+	}
 }
 
 // agent runs the server side: a runner, or a short executor call.
@@ -211,6 +272,7 @@ func (a *App) help() string {
 		{output.ExitBusy, "another run is active"},
 	}))
 	b.WriteString("\nburro <command> --help   details and an example\n")
+	b.WriteString("burro help config        burro.toml fields and test reporters\n")
 	return b.String()
 }
 

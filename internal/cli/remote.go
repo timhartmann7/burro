@@ -97,8 +97,9 @@ func (a *App) probe(ctx context.Context, h *hosts.Host) (machine, version string
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	machine = strings.TrimSpace(lines[len(lines)-1])
 	if len(lines) > 1 {
-		// The version line reads "burro <version> <os>/<arch>".
-		if fields := strings.Fields(lines[0]); len(fields) == 3 && fields[0] == binaryName {
+		// The version line reads "burro <version> <os>/<arch> (<method>)";
+		// binaries before the method ended after the platform.
+		if fields := strings.Fields(lines[0]); len(fields) >= 3 && fields[0] == binaryName {
 			version = fields[1]
 		}
 	}

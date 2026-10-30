@@ -1,0 +1,29 @@
+burro 0.1.0
+
+burro runs your coding agent's tests on your own server.
+The agent starts a run with one call and gets back a 30-line summary
+instead of megabytes of logs. Works with Claude Code, Codex and Cursor.
+
+Get started
+
+  1. Add your server (once)
+     burro host add myserver root@203.0.113.10 -i ~/.ssh/id_ed25519
+     Server already in ~/.ssh/config? burro host add myserver <its alias>
+
+  2. Set up a project (once per project)
+     cd ~/code/your-project
+     burro init
+
+  3. Hand it to your agent
+     Open Claude Code, Codex or Cursor in the project and say:
+     "Fill in burro.toml and run the tests with burro"
+
+Your agent drives burro
+  burro init adds a short rules block to CLAUDE.md or AGENTS.md.
+  From then on your agent runs tests through burro on its own.
+  Rather paste the block yourself? burro init --print
+
+Help anytime
+  burro --help         every command on one screen
+  burro help config    what goes into burro.toml
+  https://github.com/timhartmann7/burro

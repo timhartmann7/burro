@@ -3,11 +3,14 @@ package mode
 
 import "fmt"
 
-// ANSI codes for the status words. Nothing else in burro holds color codes.
+// ANSI codes for status words, welcome titles and commands. Nothing else in
+// burro holds color codes.
 const (
 	green = "\x1b[32m"
 	red   = "\x1b[31m"
 	grey  = "\x1b[90m"
+	blue  = "\x1b[34m"
+	bold  = "\x1b[1m"
 	reset = "\x1b[0m"
 )
 
@@ -68,6 +71,16 @@ func (m *Mode) Fail(s string) string {
 // Skip colors a skipped status word grey.
 func (m *Mode) Skip(s string) string {
 	return m.paint(grey, s)
+}
+
+// Title makes a section title of the welcome bold.
+func (m *Mode) Title(s string) string {
+	return m.paint(bold, s)
+}
+
+// Command colors a command the user can type blue.
+func (m *Mode) Command(s string) string {
+	return m.paint(blue, s)
 }
 
 func (m *Mode) paint(code, s string) string {

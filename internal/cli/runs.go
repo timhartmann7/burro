@@ -100,7 +100,13 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 		return noResult(proj.host, "run")
 	}
 	reply.Started.Synced = synced.Changed
-	return p.print.Started(reply.Started, synced.Took)
+	if err := p.print.Started(reply.Started, synced.Took); err != nil {
+		return err
+	}
+	if p.human {
+		a.note("next: burro wait\n")
+	}
+	return nil
 }
 
 func noResult(h *hosts.Host, what string) error {

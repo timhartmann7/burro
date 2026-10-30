@@ -30,10 +30,12 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunVersion(t *testing.T) {
 	var stdout strings.Builder
-	if err := New(nil, &stdout, io.Discard, nil, "0.3.1").Run([]string{versionFlag, helpFlag}); err != nil {
+	a := New(nil, &stdout, io.Discard, nil, "0.3.1")
+	a.executable = func() (string, error) { return "/home/u/.local/bin/burro", nil }
+	if err := a.Run([]string{versionFlag, helpFlag}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "burro 0.3.1 " + runtime.GOOS + "/" + runtime.GOARCH + "\n"; stdout.String() != want {
+	if want := "burro 0.3.1 " + runtime.GOOS + "/" + runtime.GOARCH + " (script)\n"; stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }

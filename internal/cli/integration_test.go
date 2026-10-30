@@ -52,9 +52,10 @@ func newWorldOn(t *testing.T, srv *testutil.Server, files map[string]string) *wo
 		all[k] = v
 	}
 	w := &world{
-		t:    t,
-		srv:  srv,
-		env:  []string{"HOME=" + srv.Home(), "PATH=" + os.Getenv("PATH")},
+		t:   t,
+		srv: srv,
+		// Tests never ask GitHub for the latest release.
+		env:  []string{"HOME=" + srv.Home(), "PATH=" + os.Getenv("PATH"), noCheckEnv},
 		repo: testutil.GitRepo(t, all),
 		bins: map[string][]byte{},
 	}

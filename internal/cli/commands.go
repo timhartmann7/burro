@@ -54,6 +54,10 @@ func (a *App) hostAdd(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
+	known, err := store.List()
+	if err != nil {
+		return err
+	}
 	h, undo, err := store.Add(ctx, name, target, p.flags["i"], p.flags["force"] == flagSet)
 	if err != nil {
 		return err
@@ -65,7 +69,18 @@ func (a *App) hostAdd(ctx context.Context, p *parsed) error {
 		}
 		return err
 	}
-	return printChecks(p.print, checks)
+	if err := printChecks(p.print, checks); err != nil {
+		return err
+	}
+	if p.human {
+		if st := a.state(); st != nil && st.StarOnce() {
+			a.note("If burro saves you time, a star helps: https://github.com/timhartmann7/burro\n")
+		}
+		if len(known) == 0 {
+			a.note("next: cd into your project and run burro init\n")
+		}
+	}
+	return nil
 }
 
 func (a *App) hostList(ctx context.Context, p *parsed) error {
