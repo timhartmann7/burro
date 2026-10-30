@@ -1,14 +1,94 @@
-# Your agent reads 30 lines, not 30 MB.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme/hero-dark.svg">
+  <img alt="burro. Your agent reads 30 lines, not 30 MB. Your tests go out. 30 lines come back." src=".github/readme/hero-light.svg" width="100%">
+</picture>
 
-**burro** runs your coding agent's tests on your own server. One call to start, one short summary back. Works with Claude Code, Codex and Cursor.
+<p align="center">
+  Run your coding agent's tests on your own server.<br>
+  One call to start, one short summary back. Works with Claude Code, Codex and Cursor.
+</p>
+
+<p align="center">
+  <a href="#install"><img alt="Install" src=".github/readme/key-install.svg" height="46"></a>&nbsp;
+  <a href="#quick-start"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/key-quickstart-dark.svg"><img alt="Quick start" src=".github/readme/key-quickstart-light.svg" height="46"></picture></a>&nbsp;
+  <a href="https://github.com/timhartmann7/burro"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/key-star-dark.svg"><img alt="Star on GitHub" src=".github/readme/key-star-light.svg" height="46"></picture></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/timhartmann7/burro/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/timhartmann7/burro?label=release&color=0462d3"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-363e49"></a>
+  <a href="https://github.com/timhartmann7/burro/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/timhartmann7/burro/total?label=downloads&color=363e49"></a>
+</p>
+
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare-dark.svg">
+  <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command. Below: tokens the agent reads and the cost per run on Claude Opus 5.5 for each, and how much burro saves." src=".github/readme/compare-light.svg" width="100%">
+</picture>
+
+<!--
+  The tokens in the image come from one real run, measured by hand: the
+  same suite once over plain ssh, once through burro. Cost = tokens x $4
+  per 1M, the Claude Opus 5.5 API input price.
+-->
+
+<p align="center"><sub>One real run of the same suite: [N] tokens over plain ssh, [N] through burro. Cost at the Claude Opus 5.5 API price, $4 per 1M input tokens.</sub></p>
+
+Over plain ssh the agent pulls the log into its context: ANSI codes, progress bars, and the failing test somewhere in the middle. The log stays in the context and goes out again with every later turn. burro reads the log on the server and sends back what failed, where, and the command to see more.
+
+## Install
 
 ```sh
 curl -fsSL https://github.com/timhartmann7/burro/releases/latest/download/install.sh | sh
 ```
 
-## Your agent drives it
+macOS and Linux. No sudo: the script checks the checksum and installs to `~/.local/bin`. Homebrew, `go install`, mise, aqua and ubi: [other ways to install](#other-ways-to-install).
 
-`burro init` writes a short rules block into the project's `CLAUDE.md` or `AGENTS.md`. From then on the agent runs tests through burro on its own. Rather paste it yourself? `burro init --print` prints the block and writes nothing.
+## Quick start
+
+**1. Add your server, once.** You need a Linux server on amd64 or arm64 with `rsync` and `bash`.
+
+```sh
+burro host add myserver root@203.0.113.10 -i ~/.ssh/id_ed25519
+```
+
+Already in `~/.ssh/config`? `burro host add myserver myserver` reuses the alias. burro never accepts a host key on its own: if you have never logged in to the server, it asks you to run `ssh` once by hand and check the fingerprint.
+
+**2. Paste this into Claude Code, Codex or Cursor** in your project:
+
+```text
+Set up burro in this project. Run `burro init`, then fill in burro.toml:
+the host from `burro host ls`, and one step per test command, each with
+a JUnit report (`burro help config` lists the fields). Then run the tests
+with `burro run` and `burro wait`, and fix what fails.
+```
+
+That's it. `burro init` writes a short rules block into `CLAUDE.md` or `AGENTS.md`, so from the next session on your agent runs tests through burro without being asked.
+
+## What changes for your agent
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme/how-dark.svg">
+  <img alt="Your agent calls burro run. burro syncs the code over rsync, runs the steps on your server over ssh and brings back a 30-line summary." src=".github/readme/how-light.svg" width="100%">
+</picture>
+
+- **Two calls per run.** `burro run` starts the run and returns at once. `burro wait` blocks until it ends and prints the summary. No sleep loops, no polling the log.
+- **Failures, not logs.** burro reads the JUnit reports on the server: the failed test, file and line, the first line of the error, NEW or SEEN against the last run, and the next command.
+- **Exit codes are the API.** Exit 1 means fix the code. Exit 2 means the stand is broken: the agent stops and calls you instead of hacking around it with raw `ssh`.
+- **Never a stale tree.** `burro run` syncs first and stamps the run with the tree hash. `node_modules` and build caches on the server survive between runs.
+- **The run outlives the connection.** The runner is detached on the server. Close the lid, lose the Wi-Fi: `burro wait` picks the run up again.
+- **Cleans up after itself.** Every run gets its own docker compose project, removed at the end. Secrets live in tmpfs for the run only.
+- **Your server, your keys.** burro uses your own `ssh`, `rsync` and `~/.ssh/config`. No daemon, no open ports, no account, no telemetry.
+
+burro is a pack donkey: it carries your e2e suite to the server and brings back only what the agent needs to read.
+
+<details>
+<summary><b>The rules block <code>burro init</code> writes</b></summary>
+
+<br>
+
+Keep your agent rules somewhere else? `burro init --print` prints the block and writes nothing.
 
 ```markdown
 <!-- burro:begin -->
@@ -35,27 +115,70 @@ curl -fsSL https://github.com/timhartmann7/burro/releases/latest/download/instal
 <!-- burro:end -->
 ```
 
-burro is a pack donkey: it carries your e2e suite to the server and brings back only what the agent needs to read.
+</details>
 
-## Quick start
+## FAQ
 
-You need macOS or Linux with `ssh`, `rsync` and `git`, and a Linux server on amd64 or arm64 with `rsync` and `bash`.
+<details>
+<summary><b>What do I need?</b></summary>
 
-```sh
-burro host add myserver root@203.0.113.10 -i ~/.ssh/id_ed25519   # once
-cd ~/code/your-project
-burro init                                                       # once per project
-```
+<br>
 
-Then open your agent in the project and say "Fill in burro.toml and run the tests with burro". Or run it yourself:
+On your machine: macOS or Linux with `ssh`, `rsync` and `git`. On the server: Linux on amd64 or arm64 with `rsync` and `bash`, and docker only if your steps use it. The project lives in a git repository.
+
+</details>
+
+<details>
+<summary><b>Which test runners work?</b></summary>
+
+<br>
+
+Any runner that writes JUnit XML: pytest, Go, Rust, PHPUnit, Maven, Gradle, Jest, Vitest, Playwright and most others. A step without a report gets the clean tail of its log in the summary instead. See [the JUnit table](#config).
+
+</details>
+
+<details>
+<summary><b>What happens when my laptop sleeps mid-run?</b></summary>
+
+<br>
+
+Nothing. The run lives on the server, detached from your ssh session. Run `burro wait` again and it prints the summary when the run is done. Ctrl+C during `wait` is safe too.
+
+</details>
+
+<details>
+<summary><b>Is it safe to point at my server?</b></summary>
+
+<br>
+
+burro never accepts a host key on its own and never edits `known_hosts`. Secrets travel through the stdin of `ssh`, never in arguments, live in `/dev/shm` for the run only and show up as `***` in logs. At the end of a run burro removes only that run's containers, so a cleanup can't wipe another run's database.
+
+</details>
+
+<details>
+<summary><b>Does burro send anything anywhere?</b></summary>
+
+<br>
+
+No telemetry. Besides `ssh` and `rsync` to your servers, burro checks GitHub for a new version once a day, and only for a human in a terminal. The full list and how to turn it off: [Privacy](#privacy).
+
+</details>
+
+<br>
+
+---
+
+<br>
+
+## Run it yourself
+
+The same loop your agent runs:
 
 ```sh
 burro run            # sync and start the default pipeline, returns at once
 burro wait           # Ctrl+C is safe, the run keeps going
 burro log --step e2e --grep login
 ```
-
-burro never accepts a host key on its own. If you have never logged in to the server, `host add` tells you to run `ssh` once by hand and check the fingerprint. A server already in `~/.ssh/config` needs only `burro host add myserver <its alias>`.
 
 `burro --help` lists every command on one screen.
 
@@ -96,7 +219,10 @@ npmrc = "~/.npmrc"
 drop = ['^\s*$']
 ```
 
-`burro failures` reads JUnit XML. Most test runners write it:
+<details>
+<summary><b>JUnit on your stack</b></summary>
+
+<br>
 
 | Stack | Step |
 | --- | --- |
@@ -111,22 +237,29 @@ drop = ['^\s*$']
 
 A step without `junit` gets the clean tail of its log in the summary instead.
 
+</details>
+
 ## Exit codes
 
 The exit code tells the agent at once whether to fix its code or call you.
 
-| Code | Meaning |
-| --- | --- |
-| 0 | All steps passed |
-| 1 | A step or a test failed |
-| 2 | The stand is broken: ssh, sync, missing `rsync`, the runner died, the host key is unknown or changed |
-| 3 | `wait` timed out or was interrupted; the run goes on |
-| 4 | Bad config or arguments |
-| 5 | Another run is active in this project |
+| Code | Meaning | Your agent |
+| --- | --- | --- |
+| 0 | All steps passed | Moves on |
+| 1 | A step or a test failed | Reads the summary, fixes the code |
+| 2 | The stand is broken: ssh, sync, missing `rsync`, the runner died, the host key is unknown or changed | Reports to you and stops |
+| 3 | `wait` timed out or was interrupted; the run goes on | Runs `burro wait` again |
+| 4 | Bad config or arguments | Fixes `burro.toml` or the command |
+| 5 | Another run is active in this project | Waits or runs `burro cancel` |
 
 Every error is one line plus a `fix:` line with the next step.
 
-## Other install methods
+## Other ways to install
+
+<details>
+<summary><b>Homebrew, go install, mise, aqua, ubi</b></summary>
+
+<br>
 
 Homebrew, from the tap:
 
@@ -161,6 +294,8 @@ packages:
     asset: burro_{{.OS}}_{{.Arch}}.tar.gz
 ```
 
+</details>
+
 Every release has `checksums.txt`, a keyless cosign signature of it in `checksums.txt.sigstore.json` and a GitHub attestation.
 
 ## Docker isolation
@@ -173,7 +308,7 @@ A step that starts containers with plain `docker run` must label them:
 docker run --label burro.run=$BURRO_RUN ...
 ```
 
-At the end of every run, after `burro cancel` and on `burro clean`, burro removes the run's compose project and everything labelled with its key. Nothing else on the server is touched, so a debugging cleanup can't wipe the database of another run.
+At the end of every run, after `burro cancel` and on `burro clean`, burro removes the run's compose project and everything labelled with its key. Nothing else on the server is touched.
 
 ## Secrets
 
@@ -189,8 +324,17 @@ burro has no telemetry. Besides `ssh` and `rsync` to the servers you add, it mak
 - For a `go install` build only: the server binary and `checksums.txt` from GitHub Releases, when a server needs the binary.
 - `install.sh` downloads the archive and `checksums.txt` from GitHub Releases.
 
-The only official repository is `github.com/timhartmann7/burro`.
+<br>
 
-## License
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme/footer-dark.svg">
+  <img alt="Your tests go out. 30 lines come back. burro carries your e2e suite so your laptop doesn't have to." src=".github/readme/footer-light.svg" width="100%">
+</picture>
 
-Apache 2.0, see [LICENSE](LICENSE).
+<p align="center">
+  <a href="https://github.com/timhartmann7/burro"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/key-star-dark.svg"><img alt="Star on GitHub" src=".github/readme/key-star-light.svg" height="46"></picture></a>
+</p>
+
+<p align="center">
+  <sub>The only official repository is <code>github.com/timhartmann7/burro</code>. Apache 2.0, see <a href="LICENSE">LICENSE</a>.</sub>
+</p>
