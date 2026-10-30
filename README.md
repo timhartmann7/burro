@@ -24,16 +24,14 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare-dark.svg">
-  <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command. Below: tokens the agent reads and the cost per run on Claude Opus 5.5 for each, and how much burro saves." src=".github/readme/compare-light.svg" width="100%">
+  <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command." src=".github/readme/compare-light.svg" width="100%">
 </picture>
 
 <!--
-  The tokens in the image come from one real run, measured by hand: the
-  same suite once over plain ssh, once through burro. Cost = tokens x $4
-  per 1M, the Claude Opus 5.5 API input price.
+  The measured number goes here: tokens the agent read on one real run of
+  the same suite, once over plain ssh and once through burro, and the cost
+  at the Claude Opus 5.5 API input price.
 -->
-
-<p align="center"><sub>One real run of the same suite: [N] tokens over plain ssh, [N] through burro. Cost at the Claude Opus 5.5 API price, $4 per 1M input tokens.</sub></p>
 
 Over plain ssh the agent pulls the log into its context: ANSI codes, progress bars, and the failing test somewhere in the middle. The log stays in the context and goes out again with every later turn. burro reads the log on the server and sends back what failed, where, and the command to see more.
 
