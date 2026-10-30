@@ -50,6 +50,9 @@ func blackHole(t *testing.T) (addr string, accepts *atomic.Int32) {
 // acceptance: S4-10 S4-08
 func TestVersionCheckNetwork(t *testing.T) {
 	bin := testutil.BuildBurro(t, "-ldflags", "-X main.version=0.1.0")
+	// The first start of a fresh binary can take a second on its own, as
+	// macOS scans it; the timings below are about the network only.
+	testutil.RunBurro(t, bin, "--version")
 	proxy, accepts := blackHole(t)
 	base := []string{"PATH=" + os.Getenv("PATH"), "HTTPS_PROXY=http://" + proxy}
 	run := func(home string, extra ...string) (testutil.Result, time.Duration) {
