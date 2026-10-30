@@ -11,7 +11,9 @@ want='Tim Hartmann <timhartmann7@proton.me>'
 msg=$(mktemp)
 trap 'rm -f "$msg"' EXIT
 
-commits=$(git rev-list "$1")
+# A merge commit from GitHub's merge button carries GitHub as committer and
+# no change of its own; the commits it merges are in the range and checked.
+commits=$(git rev-list --no-merges "$1")
 status=0
 for sha in $commits; do
 	short=$(git rev-parse --short "$sha")

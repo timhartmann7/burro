@@ -31,6 +31,7 @@ const (
 	testFile     = "x/a_test.go"
 	makefile     = "Makefile"
 	coveredTest  = "internal/a/a_test.go"
+	quotePaths   = "fix: quote paths"
 	halfCoverage = "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\tif A(1) != 1 {\n\t\tt.Fatal()\n\t}\n}\n"
 )
 
@@ -207,10 +208,46 @@ type fakeCommit struct {
 }
 
 // acceptance: S0-04
+func TestCommitsSkipMergeButton(t *testing.T) {
+	github := []string{"GIT_COMMITTER_NAME=GitHub", "GIT_COMMITTER_EMAIL=noreply@github.com"}
+	stranger := []string{"GIT_AUTHOR_NAME=Someone", "GIT_AUTHOR_EMAIL=someone@example.com"}
+	tests := []struct {
+		name   string
+		branch fakeCommit
+		want   string
+	}{
+		{name: "merged good commit", branch: fakeCommit{msg: quotePaths}},
+		{name: "merged bad commit", branch: fakeCommit{stranger, quotePaths}, want: "author is Someone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := gitRepo(t)
+			commit(t, dir, nil, "build: initialize the module")
+			mustRun(t, dir, nil, "git", "switch", "-q", "-c", "feature")
+			commit(t, dir, tt.branch.env, tt.branch.msg)
+			mustRun(t, dir, nil, "git", "switch", "-q", "-")
+			mustRun(t, dir, github, "git", "merge", "-q", "--no-ff", "--no-verify", "-m", "Merge pull request #6 from timhartmann7/feature", "feature")
+			code, out := run(t, dir, nil, script(t, "commits.sh"), "HEAD~1..HEAD")
+			if tt.want == "" && code != 0 {
+				t.Fatalf("failed on a merge of correct commits:\n%s", out)
+			}
+			if tt.want != "" && (code == 0 || !strings.Contains(out, tt.want)) {
+				t.Fatalf("exit %d, want failure with %q:\n%s", code, tt.want, out)
+			}
+		})
+	}
+	// Outside a merge, GitHub as committer still fails.
+	dir := gitRepo(t)
+	commit(t, dir, github, quotePaths)
+	if code, out := run(t, dir, nil, script(t, "commits.sh"), head); code == 0 || !strings.Contains(out, "committer is GitHub <noreply@github.com>") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+}
+
 func TestCommits(t *testing.T) {
 	stranger := []string{"GIT_AUTHOR_NAME=Someone", "GIT_AUTHOR_EMAIL=someone@example.com"}
 	committer := []string{"GIT_COMMITTER_NAME=Tim Hartmann", "GIT_COMMITTER_EMAIL=tim@example.com"}
-	good := fakeCommit{msg: "fix: quote paths"}
+	good := fakeCommit{msg: quotePaths}
 	const sync = "feat: add sync"
 	tests := []struct {
 		name    string
