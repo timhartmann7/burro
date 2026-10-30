@@ -107,7 +107,7 @@ func (a *App) probe(ctx context.Context, h *hosts.Host) (machine, version string
 
 // install uploads this client's server binary for machine.
 func (a *App) install(ctx context.Context, h *hosts.Host, machine string) error {
-	bin, err := a.binaries.ForMachine(machine)
+	bin, err := a.binaries.ForMachine(ctx, machine)
 	if err != nil {
 		return fmt.Errorf("host %s: %w", h.Name(), err)
 	}

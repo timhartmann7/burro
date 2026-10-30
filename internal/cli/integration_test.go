@@ -13,9 +13,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/serverbin"
 	"github.com/timhartmann7/burro/internal/testutil"
 )
 
@@ -60,20 +62,26 @@ func newWorldOn(t *testing.T, srv *testutil.Server, files map[string]string) *wo
 	return w
 }
 
+// goarchOf is the Go architecture of a server whose uname -m printed
+// machine, or empty for one burro doesn't run on.
+func goarchOf(machine string) string {
+	return map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[machine]
+}
+
 // builtBinaries builds the server binary of one version on demand.
 type builtBinaries struct {
 	w       *world
 	version string
 }
 
-func (b builtBinaries) ForMachine(machine string) ([]byte, error) {
-	arch := map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[machine]
+func (b builtBinaries) ForMachine(_ context.Context, machine string) ([]byte, error) {
+	arch := goarchOf(machine)
 	if arch == "" {
 		return nil, fmt.Errorf("test server reports machine %q", machine)
 	}
 	key := b.version + "/" + arch
 	if b.w.bins[key] == nil {
-		b.w.bins[key] = testutil.BuildServerBurro(b.w.t, b.version, arch)
+		b.w.bins[key] = testutil.BuildServerBurro(b.w.t, b.version, arch) //nolint:contextcheck // the build belongs to the test, not to the command asking for the binary
 	}
 	return b.w.bins[key], nil
 }
@@ -559,22 +567,17 @@ func TestMissingServerBinary(t *testing.T) {
 	w.must(v1, argSync)
 	var stdout, stderr strings.Builder
 	a := New(strings.NewReader(""), &stdout, io.Discard, w.env, v2)
-	a.binaries = missingBinaries{}
+	// A dev build without embedded binaries has no release to download from.
+	a.binaries = serverbin.New(fstest.MapFS{}, "dev", serverbin.ReleaseBase)
 	if code := output.Report(&stderr, a.Run([]string{argExec, "true"})); code != 2 ||
 		!strings.Contains(stderr.String(), "no server binary") || !strings.Contains(stderr.String(), "\nfix: ") {
 		t.Fatalf("exit %d %q", code, stderr.String())
 	}
 	stdout.Reset()
 	if code := output.Report(&stderr, a.Run([]string{argDoctor})); code != 2 ||
-		!strings.Contains(stdout.String(), "burro   FAIL  host vps1: no server binary") {
+		!strings.Contains(stdout.String(), "burro   FAIL  host vps1: this build of burro (dev) has no server binary") {
 		t.Fatalf("doctor: exit %d %q", code, stdout.String())
 	}
-}
-
-type missingBinaries struct{}
-
-func (missingBinaries) ForMachine(string) ([]byte, error) {
-	return nil, output.NewError(output.ExitServer, "no server binary in this build", "install a release build")
 }
 
 func TestExecWithoutSync(t *testing.T) {

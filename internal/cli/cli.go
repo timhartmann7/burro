@@ -35,7 +35,7 @@ const (
 // serverBinaries hands out the executor for a server's architecture.
 // Tests swap in binaries they build themselves.
 type serverBinaries interface {
-	ForMachine(machine string) ([]byte, error)
+	ForMachine(ctx context.Context, machine string) ([]byte, error)
 }
 
 const (
@@ -67,14 +67,15 @@ type App struct {
 // linkedVersion is the version set with -ldflags -X, or empty in a plain
 // build.
 func New(stdin io.Reader, stdout, stderr io.Writer, env []string, linkedVersion string) *App {
+	version := resolveVersion(linkedVersion)
 	a := &App{
 		stdin:    stdin,
 		stdout:   stdout,
 		stderr:   stderr,
 		env:      env,
-		version:  resolveVersion(linkedVersion),
+		version:  version,
 		terminal: isTerminal(stdout),
-		binaries: serverbin.New(),
+		binaries: serverbin.New(serverbin.Embedded(), version, serverbin.ReleaseBase),
 	}
 	a.commands = a.registry()
 	return a
