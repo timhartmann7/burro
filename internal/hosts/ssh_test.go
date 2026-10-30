@@ -83,7 +83,7 @@ func TestRunRefused(t *testing.T) {
 	if msg, _ := fixLine(t, err); !strings.Contains(msg, "host local: ssh failed") {
 		t.Fatalf("msg = %q", msg)
 	}
-	_, err = h.Sync(ctx, t.TempDir(), "x", "")
+	_, err = h.Sync(ctx, &Tree{Root: t.TempDir()}, "x")
 	if msg, _ := fixLine(t, err); !strings.HasPrefix(msg, "sync: host local:") {
 		t.Fatalf("msg = %q", msg)
 	}
@@ -159,10 +159,29 @@ func TestPrepareFails(t *testing.T) {
 	if _, err := h.Run(context.Background(), nil, "true"); err == nil {
 		t.Fatal("Run passed without a control folder")
 	}
-	if _, err := h.Sync(context.Background(), "/", "x", ""); err == nil {
+	if _, err := h.Sync(context.Background(), &Tree{Root: "/"}, "x"); err == nil {
 		t.Fatal("Sync passed without a control folder")
 	}
 	if err := os.Remove(filepath.Join(s.home, ".burro")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRsyncPattern(t *testing.T) {
+	for _, tc := range []struct{ path, suffix, want string }{
+		{"debug.log", "", "/debug.log"},
+		{"node_modules/", "", "/node_modules/"},
+		{"a b /c ", "", "/a b /c "},
+		// Without a wildcard rsync takes a backslash as is.
+		{`d\e`, "", `/d\e`},
+		{"a*b?[1]", "", `/a\*b\?\[1]`},
+		{`d\e*`, "", `/d\\e\*`},
+		{"odd\nname\r.log", "", "/odd[[:cntrl:]]name[[:cntrl:]].log"},
+		{"build/", "**", "/build/**"},
+		{`b\[x]/`, "**", `/b\\\[x]/**`},
+	} {
+		if got := rsyncPattern(tc.path, tc.suffix); got != tc.want {
+			t.Errorf("rsyncPattern(%q, %q) = %q, want %q", tc.path, tc.suffix, got, tc.want)
+		}
 	}
 }

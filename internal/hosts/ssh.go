@@ -197,10 +197,25 @@ func (h *Host) storedParts() (u, host, port string) {
 	return u, host, port
 }
 
-// Sync copies root to dir on the host with rsync and returns how many files
-// it changed. .gitignore rules and .git/info/exclude decide what stays
-// local; ignored files on the server are left alone.
-func (h *Host) Sync(ctx context.Context, root, dir, excludeFile string) (int, error) {
+// Tree is what Sync copies from this machine.
+type Tree struct {
+	// Root is the local top folder.
+	Root string
+	// Exclude is .git/info/exclude, or empty.
+	Exclude string
+	// Ignored are the paths git leaves out of the tree, folders with a
+	// trailing slash. They are not sent and stay on the server.
+	Ignored []string
+	// Kept are ignored folders that hold tracked files. The tracked files
+	// are sent; everything else in them stays on the server.
+	Kept []string
+}
+
+// Sync copies the tree to dir on the host with rsync and returns how many
+// files it changed. Git's own lists decide what is sent, because rsync reads
+// .gitignore differently: no negation, no tracked files that match a rule.
+// .gitignore and .git/info/exclude still protect what the server built.
+func (h *Host) Sync(ctx context.Context, t *Tree, dir string) (int, error) {
 	if err := h.store.prepare(); err != nil {
 		return 0, err
 	}
@@ -208,22 +223,45 @@ func (h *Host) Sync(ctx context.Context, root, dir, excludeFile string) (int, er
 	// doubles a no-change sync of a large tree on a distant server.
 	// Temp files go to .burro/tmp, which --delete never touches, so two
 	// syncs at once can't delete each other's files.
-	args := []string{"-az", "--no-inc-recursive", "--delete", "--itemize-changes", "--temp-dir=.burro/tmp", "--filter=:- .gitignore"}
-	if excludeFile != "" {
-		args = append(args, "--exclude-from="+excludeFile)
+	args := []string{
+		"-az", "--no-inc-recursive", "--delete", "--itemize-changes", "--temp-dir=.burro/tmp",
+		"--filter=merge -", "--filter=:-r .gitignore",
+	}
+	if t.Exclude != "" {
+		args = append(args, "--filter=merge,-r "+t.Exclude)
 	}
 	args = append(args, "--exclude=/.git/", "--exclude=/.burro/",
 		"-e", commandLine(append([]string{sshTool}, h.store.sshOptions()...)),
-		root+"/", h.name+":"+dir+"/")
+		t.Root+"/", h.name+":"+dir+"/")
+	var rules strings.Builder
+	for _, path := range t.Ignored {
+		rules.WriteString("- " + rsyncPattern(path, "") + "\n")
+	}
+	for _, folder := range t.Kept {
+		rules.WriteString("P " + rsyncPattern(folder, "**") + "\n")
+	}
 	counter := &itemCounter{}
 	stderr := &capped{max: maxStderr}
 	cmd := h.store.command(ctx, "rsync", args)
+	cmd.Stdin = strings.NewReader(rules.String())
 	cmd.Stdout = counter
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		return 0, fmt.Errorf("sync: %w", h.failure(ctx, "rsync", err, stderr.String()))
 	}
 	return counter.n, nil
+}
+
+// rsyncPattern matches path, relative to the transfer root, and nothing
+// else, followed by suffix. rsync reads backslashes as escapes only in a
+// pattern with wildcards, and a newline or carriage return would end the
+// rule, so those match as a control character class.
+func rsyncPattern(path, suffix string) string {
+	if !strings.ContainsAny(path+suffix, "*?[\n\r") {
+		return "/" + path + suffix
+	}
+	escape := strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, "\n", "[[:cntrl:]]", "\r", "[[:cntrl:]]")
+	return "/" + escape.Replace(path) + suffix
 }
 
 // CheckRsync fails when the local rsync can't keep ignored files on the

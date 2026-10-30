@@ -3,9 +3,11 @@
 package tree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -93,6 +95,61 @@ func writeIn(dir, name string, data []byte) error {
 	return errors.Join(root.WriteFile(name, data, 0o600), root.Close())
 }
 
+// Ignored returns what git leaves out of the tree, so a sync sends exactly
+// the files the hash covers: untracked paths that ignore rules match, a
+// whole folder as one path with a trailing slash, and the ignored folders
+// that still hold tracked files. rsync can't read .gitignore the way git
+// does, so git decides.
+func (r *Repo) Ignored(ctx context.Context) (paths, folders []string, err error) {
+	out, err := r.run(ctx, nil, nil, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	if err != nil {
+		return nil, nil, ignoredError(err)
+	}
+	paths = names(out)
+	out, err = r.run(ctx, nil, nil, "ls-files", "-z", "--cached", "--ignored", "--exclude-standard")
+	if err != nil {
+		return nil, nil, ignoredError(err)
+	}
+	parents := parentFolders(names(out))
+	if len(parents) == 0 {
+		return paths, nil, nil
+	}
+	out, err = r.run(ctx, nil, bytes.NewReader(parents), "check-ignore", "-z", "--stdin", "--no-index")
+	var exit *exec.ExitError
+	// Exit 1 means none of the folders is ignored.
+	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1) {
+		return nil, nil, ignoredError(err)
+	}
+	return paths, names(out), nil
+}
+
+// parentFolders lists every folder above the given paths once, with a
+// trailing slash so git matches folder rules, NUL-terminated for its stdin.
+func parentFolders(paths []string) []byte {
+	var list []byte
+	seen := map[string]bool{}
+	for _, path := range paths {
+		for i, c := range path {
+			if c == '/' && !seen[path[:i+1]] {
+				seen[path[:i+1]] = true
+				list = append(append(list, path[:i+1]...), 0)
+			}
+		}
+	}
+	return list
+}
+
+// names splits NUL-terminated git output.
+func names(out []byte) []string {
+	var list []string
+	for name := range strings.SplitSeq(string(out), "\x00") {
+		if name != "" {
+			list = append(list, name)
+		}
+	}
+	return list
+}
+
 // ExcludeFile returns the absolute path of .git/info/exclude, or empty when
 // the repository has none.
 func (r *Repo) ExcludeFile(ctx context.Context) (string, error) {
@@ -118,21 +175,49 @@ func (r *Repo) gitPath(ctx context.Context, name string) (string, error) {
 }
 
 func (r *Repo) git(ctx context.Context, env []string, args ...string) (string, error) {
+	out, err := r.run(ctx, env, nil, args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// run is git with stdin and its output untouched, so names that start or
+// end with a space survive.
+func (r *Repo) run(ctx context.Context, env []string, stdin io.Reader, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	//nolint:gosec // G204: git with an argument slice, no shell in between.
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.root
 	cmd.Env = append(append([]string{}, r.env...), env...)
+	cmd.Stdin = stdin
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(exit.Stderr)))
+			return out, &gitError{args: args, exit: exit}
 		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
+}
+
+// gitError is git's own failure: the message is what git printed, and the
+// exit status stays reachable through errors.As.
+type gitError struct {
+	args []string
+	exit *exec.ExitError
+}
+
+func (e *gitError) Error() string {
+	return fmt.Sprintf("git %s: %s", strings.Join(e.args, " "), strings.TrimSpace(string(e.exit.Stderr)))
+}
+
+func (e *gitError) Unwrap() error {
+	return e.exit
+}
+
+func ignoredError(err error) error {
+	return output.NewError(output.ExitServer, "ignored files: "+err.Error(),
+		"check that git status works in the project")
 }
 
 func hashError(err error) error {

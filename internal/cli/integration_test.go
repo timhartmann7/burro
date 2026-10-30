@@ -16,6 +16,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/timhartmann7/burro/internal/hosts"
 	"github.com/timhartmann7/burro/internal/output"
 	"github.com/timhartmann7/burro/internal/serverbin"
 	"github.com/timhartmann7/burro/internal/testutil"
@@ -378,6 +379,57 @@ func TestSyncLeavesServerFilesAlone(t *testing.T) {
 	}
 }
 
+// The server gets exactly the tree the hash describes, where git and rsync
+// read .gitignore differently, and keeps what the server built itself.
+func TestSyncSendsTheHashedTree(t *testing.T) {
+	w := newWorld(t, map[string]string{
+		gitignore: "build/\n*.log\n!keep.log\nconf/local\nnode_modules/\n",
+		// Re-included by a negation, and ignored only at the top level.
+		"keep.log":       "kept by a negation",
+		"sub/conf/local": "nested",
+	})
+	tracked := map[string]string{
+		"build/tracked.txt":   "in an ignored folder",
+		"tracked.log":         "matches *.log",
+		"ab.log":              "next to an ignored a*.log",
+		"oddxname.log":        "next to an ignored name with a newline",
+		"excluded-by-git.txt": "matches .git/info/exclude",
+	}
+	for name, content := range tracked {
+		writeFile(t, filepath.Join(w.repo, name), content)
+		testutil.Git(t, w.repo, "add", "-f", name)
+	}
+	testutil.Git(t, w.repo, "commit", "-q", "-m", "tracked but ignored")
+	writeFile(t, filepath.Join(w.repo, ".git", "info", "exclude"), "/excluded-by-git.txt\n/local-only.txt\n")
+	for _, name := range []string{"build/junk.o", "debug.log", "a*.log", "odd\nname.log", "node_modules/x.js", "local-only.txt"} {
+		writeFile(t, filepath.Join(w.repo, name), "ignored")
+	}
+	w.addHost(v1)
+	w.must(v1, argSync)
+	w.srv.Exec(t, "sh", "-c", `cd burro/app && mkdir -p node_modules/p && for f in build/server.o node_modules/p/i.js server.log local-only.txt stale.txt; do echo server > "$f"; done`)
+
+	w.must(v1, argSync)
+	want := map[string]string{}
+	for _, name := range strings.Split(strings.TrimSuffix(testutil.Git(t, w.repo, "ls-files", "-z", "-co", "--exclude-standard"), "\x00"), "\x00") {
+		want[name] = readFile(t, filepath.Join(w.repo, name))
+	}
+	if len(want) != 9 {
+		t.Fatalf("git tree %v", want)
+	}
+	for _, name := range []string{"build/server.o", "node_modules/p/i.js", "server.log", "local-only.txt"} {
+		want[name] = "server"
+	}
+	got := w.serverFiles(appDir)
+	for name, content := range want {
+		if strings.TrimSuffix(got[name], "\n") != strings.TrimSuffix(content, "\n") {
+			t.Errorf("%q: server has %q, want %q", name, got[name], content)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("server has %d files, want %d: %q", len(got), len(want), got)
+	}
+}
+
 // acceptance: S1-12
 func TestRepeatSyncIsFast(t *testing.T) {
 	files := map[string]string{gitignore: ignoreLogs}
@@ -620,7 +672,7 @@ func TestSyncTimeouts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Sync(ctx, w.repo, appDir, ""); err == nil {
+	if _, err := h.Sync(ctx, &hosts.Tree{Root: w.repo}, appDir); err == nil {
 		t.Fatal("sync with a canceled context passed")
 	}
 }

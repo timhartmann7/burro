@@ -321,6 +321,10 @@ func (a *App) push(ctx context.Context, proj *project) (*output.Sync, error) {
 	if err != nil {
 		return nil, err
 	}
+	ignored, kept, err := proj.repo.Ignored(ctx)
+	if err != nil {
+		return nil, err
+	}
 	h, dir := proj.host, proj.cfg.Dir()
 	if err := a.connect(ctx, h); err != nil {
 		return nil, err
@@ -330,7 +334,7 @@ func (a *App) push(ctx context.Context, proj *project) (*output.Sync, error) {
 	}
 	longCtx, cancel := context.WithTimeout(ctx, longTimeout)
 	defer cancel()
-	changed, err := h.Sync(longCtx, proj.repo.Root(), dir, exclude)
+	changed, err := h.Sync(longCtx, &hosts.Tree{Root: proj.repo.Root(), Exclude: exclude, Ignored: ignored, Kept: kept}, dir)
 	if err != nil {
 		return nil, err
 	}
