@@ -1,0 +1,82 @@
+# Release of burro: archives for four platforms, checksums.txt with a keyless
+# cosign signature, install.sh, and the cask in the tap.
+version: 2
+
+project_name: burro
+
+before:
+  hooks:
+    # The Linux server binaries land in internal/serverbin/bin/ first, so
+    # every client archive embeds both.
+    - make build VERSION={{ .Version }}
+
+builds:
+  - id: burro
+    main: ./cmd/burro
+    binary: burro
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: burro
+    formats: [tar.gz]
+    # No version in the name, so releases/latest/download/ links stay put.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    # Apache 2.0 asks for both in every distribution.
+    files:
+      - LICENSE
+      - NOTICE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  extra_files:
+    - glob: ./install.sh
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+    artifacts: checksum
+
+release:
+  extra_files:
+    - glob: ./install.sh
+
+homebrew_casks:
+  - name: burro
+    repository:
+      owner: timhartmann7
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/timhartmann7/burro
+    description: Run your coding agent's tests on your own server
+    caveats: Run burro to get started.
+    commit_author:
+      name: Tim Hartmann
+      email: timhartmann7@proton.me
+    commit_msg_template: "chore: update burro to {{ .Tag }}"
+    hooks:
+      post:
+        # The binary isn't notarized; without this Gatekeeper blocks it.
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/burro"]
+          end
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: github-native

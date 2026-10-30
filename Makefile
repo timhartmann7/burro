@@ -46,10 +46,21 @@ ZIZMOR_SHA256_darwin-arm64 := ad5aa633cd56215b11e6c51d51f90c7e6b22904a75047d1215
 ZIZMOR_SHA256_linux-amd64 := d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
 ZIZMOR_SHA256_linux-arm64 := 37eebbd5762a44f262d94875431b14a6d2402991e90a685113ea97b8b41be833
 
+GORELEASER_VERSION := 2.19.0
+GORELEASER_ASSET_darwin-amd64 := Darwin_x86_64
+GORELEASER_ASSET_darwin-arm64 := Darwin_arm64
+GORELEASER_ASSET_linux-amd64 := Linux_x86_64
+GORELEASER_ASSET_linux-arm64 := Linux_arm64
+GORELEASER_SHA256_darwin-amd64 := 164fce297e601ec00009e40d26858789b637335b5564bff2c99027b10d28bafe
+GORELEASER_SHA256_darwin-arm64 := 713192b46698ac10ed9275abf25c922a152ab8280c71ae58dc0ff46a33f60004
+GORELEASER_SHA256_linux-amd64 := ebc3194ad1d1b1787614405285a0039665cd4c5bd3305215a1b201600f90630b
+GORELEASER_SHA256_linux-arm64 := ef33741b684c9f62d6a21e7a3c8b051f139ea7b1d301693b67cc819c46226d53
+
 # Stable paths that lefthook calls too; each links to the pinned version.
 GOLANGCI := $(BIN)/golangci-lint
 SHELLCHECK := $(BIN)/shellcheck
 ZIZMOR := $(BIN)/zizmor
+GORELEASER := $(BIN)/goreleaser
 SHFMT := $(GO_TOOL) shfmt
 
 # fetch downloads $(1), checks it against sha256 $(2) and extracts member $(3)
@@ -81,7 +92,13 @@ $(ZIZMOR_PINNED):
 $(ZIZMOR): $(ZIZMOR_PINNED)
 	@cd $(@D) && ln -sf $(patsubst $(@D)/%,%,$<) $(@F)
 
-.PHONY: fmt lint deadcode deps vuln english test test-integration fuzz cover check acceptance build
+GORELEASER_PINNED := $(BIN)/goreleaser-$(GORELEASER_VERSION)/goreleaser
+$(GORELEASER_PINNED):
+	$(call fetch,https://github.com/goreleaser/goreleaser/releases/download/v$(GORELEASER_VERSION)/goreleaser_$(GORELEASER_ASSET_$(PLATFORM)).tar.gz,$(GORELEASER_SHA256_$(PLATFORM)),goreleaser)
+$(GORELEASER): $(GORELEASER_PINNED)
+	@cd $(@D) && ln -sf $(patsubst $(@D)/%,%,$<) $(@F)
+
+.PHONY: fmt lint deadcode deps vuln english test test-integration fuzz cover check acceptance build snapshot
 
 fmt: $(GOLANGCI)
 	$(GOLANGCI) fmt
@@ -115,8 +132,9 @@ test:
 	$(GO_TOOL) gotestsum -- -race -shuffle=on -count=1 ./...
 
 # One pass of the run tests takes minutes, so COUNT=5 needs more than go
-# test's default of 10 minutes per package.
-test-integration:
+# test's default of 10 minutes per package. The journey and release tests
+# install from the snapshot in dist/.
+test-integration: snapshot
 	$(GO_TOOL) gotestsum -- -tags integration -race -shuffle=on -count=$(COUNT) -timeout 30m ./...
 
 fuzz:
@@ -126,7 +144,7 @@ fuzz:
 		done; \
 	done
 
-cover:
+cover: snapshot
 	scripts/coverage.sh
 
 # acceptance: S0-01
@@ -140,10 +158,20 @@ acceptance:
 
 # The Linux binaries are built while internal/serverbin/bin/ holds only its
 # README, so they don't embed each other, then copied there for the client.
+# VERSION=0.1.0 links a release version into all three.
+VERSION ?=
+LDFLAGS := -s -w -X main.version=$(VERSION)
 build:
 	rm -f internal/serverbin/bin/burro-linux-*
 	for arch in amd64 arm64; do \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -o bin/burro-linux-$$arch ./cmd/burro || exit 1; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o bin/burro-linux-$$arch ./cmd/burro || exit 1; \
 	done
 	cp bin/burro-linux-amd64 bin/burro-linux-arm64 internal/serverbin/bin/
-	CGO_ENABLED=0 go build -trimpath -o bin/burro ./cmd/burro
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/burro ./cmd/burro
+
+# A local release into dist/: every archive, checksums.txt, install.sh and
+# the cask, unsigned and unpublished. A real release attaches install.sh
+# itself; a snapshot publishes nothing, so it is copied here.
+snapshot: $(GORELEASER)
+	$(GORELEASER) release --snapshot --clean --skip=sign
+	cp install.sh dist/

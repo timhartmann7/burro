@@ -4,3 +4,4 @@
 /bin/
 /internal/serverbin/bin/*
 !/internal/serverbin/bin/README
+/dist/
