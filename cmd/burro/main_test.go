@@ -23,7 +23,9 @@ func TestVersion(t *testing.T) {
 		flags []string
 		want  string
 	}{
-		{name: "plain build", want: "burro dev " + platform + " (script)\n"},
+		// On a clean checkout of a tag go build stamps the tag as the
+		// version, so the build without version info leaves VCS out.
+		{name: "plain build", flags: []string{"-buildvcs=false"}, want: "burro dev " + platform + " (script)\n"},
 		{name: "ldflags", flags: []string{"-ldflags", "-X main.version=1.4.2"}, want: "burro 1.4.2 " + platform + " (script)\n"},
 	}
 	for _, tt := range tests {
