@@ -33,6 +33,7 @@ const (
 	argE2E       = "e2e"
 	argCancel    = "cancel"
 	argStep      = "--step"
+	argGrep      = "--grep"
 	argOnly      = "--only"
 	argTimeout   = "--timeout"
 	argNope      = "nope"
@@ -119,7 +120,7 @@ func TestParse(t *testing.T) {
 		{args: []string{argRun}, cmd: argRun, flags: map[string]string{}},
 		{args: []string{argRun, argVerify, argOnly, "a,b", "--from=e2e"}, cmd: argRun, pos: []string{argVerify}, flags: map[string]string{"only": "a,b", "from": argE2E}},
 		{args: []string{argWait, "r3"}, cmd: argWait, pos: []string{"r3"}, flags: map[string]string{"timeout": "60m"}},
-		{args: []string{cmdLog, argStep, argE2E, "--grep", "a b", "r2"}, cmd: cmdLog, pos: []string{"r2"}, flags: map[string]string{"step": argE2E, "grep": "a b", "tail": "60", "context": "5"}},
+		{args: []string{cmdLog, argStep, argE2E, argGrep, "a b", "r2"}, cmd: cmdLog, pos: []string{"r2"}, flags: map[string]string{"step": argE2E, "grep": "a b", "tail": "60", "context": "5"}},
 		{args: []string{argStatus, argJSON}, cmd: argStatus, flags: map[string]string{flagJSON: flagSet}},
 		{args: []string{argCancel, "r1"}, cmd: argCancel, pos: []string{"r1"}, flags: map[string]string{}},
 	}

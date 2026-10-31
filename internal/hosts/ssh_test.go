@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,6 +69,45 @@ func TestSSHErrors(t *testing.T) {
 				t.Fatalf("got\n%s\nfix: %s\nwant\n%s\nfix: %s", msg, fix, tt.msg, tt.fix)
 			}
 		})
+	}
+}
+
+func TestDropped(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	h, _, err := s.Add(ctx, "vps1", "root@203.0.113.10", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exited := func(code string) error {
+		return exec.CommandContext(ctx, "sh", "-c", "exit "+code).Run()
+	}
+	for _, tt := range []struct {
+		stderr, code string
+		dropped      bool
+	}{
+		{stderr: "Timeout, server 203.0.113.10 not responding.\n", code: "255", dropped: true},
+		{stderr: "client_loop: send disconnect: Broken pipe\n", code: "255", dropped: true},
+		{stderr: "Read from remote host 203.0.113.10: Connection reset by peer\n", code: "255", dropped: true},
+		{stderr: "ssh: connect to host 203.0.113.10 port 22: Operation timed out\n", code: "255", dropped: true},
+		{stderr: "", code: "255", dropped: true},
+		{stderr: "ssh: connect to host 203.0.113.10 port 22: Host is down\n", code: "255", dropped: true},
+		// Setup problems fail the same way every time.
+		{stderr: "Host key verification failed.\n", code: "255"},
+		{stderr: "root@203.0.113.10: Permission denied (publickey).\n", code: "255"},
+		// The remote command's own exit is no ssh failure at all.
+		{stderr: "Connection reset", code: "3"},
+	} {
+		err := h.failure(ctx, sshTool, exited(tt.code), tt.stderr)
+		fixLine(t, err)
+		if Dropped(err) != tt.dropped {
+			t.Errorf("exit %s %q: dropped %v, want %v", tt.code, tt.stderr, Dropped(err), tt.dropped)
+		}
+	}
+	late, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := h.failure(late, sshTool, exited("255"), ""); Dropped(err) {
+		t.Errorf("a call past its own deadline counts as dropped: %v", err)
 	}
 }
 

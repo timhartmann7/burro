@@ -103,7 +103,17 @@ func (h *Host) failure(ctx context.Context, tool string, err error, stderr strin
 	code := exit.ExitCode()
 	// rsync reports a failed ssh as 255 or as a broken protocol stream.
 	if code == sshFailed || (tool == "rsync" && code == 12) {
-		return h.sshError(ctx, stderr)
+		failed := h.sshError(ctx, stderr)
+		// ssh names every setup problem; a session cut off from the other
+		// end may end without a word.
+		dropped := strings.TrimSpace(stderr) == ""
+		for _, mark := range droppedMarks() {
+			dropped = dropped || strings.Contains(stderr, mark)
+		}
+		if dropped {
+			return &droppedError{failed}
+		}
+		return failed
 	}
 	what := tool
 	if tool == sshTool {
@@ -114,9 +124,36 @@ func (h *Host) failure(ctx context.Context, tool string, err error, stderr strin
 		"run burro doctor "+h.name)
 }
 
+// droppedMarks are what ssh prints when the network, not the setup, failed:
+// a connection that broke or a server that didn't answer for a while.
+func droppedMarks() []string {
+	return []string{
+		"timed out", "not responding", "Connection reset", "Connection closed",
+		"closed by remote host", "Broken pipe", "No route to host", "Network is unreachable",
+		"Host is down", "Connection refused",
+	}
+}
+
+// droppedError is an ssh failure that trying again later may get past.
+type droppedError struct {
+	err *output.Error
+}
+
+func (d *droppedError) Error() string { return d.err.Error() }
+
+func (d *droppedError) Unwrap() error { return d.err }
+
+// Dropped tells whether err is a connection that broke or a server that
+// didn't answer, as opposed to a setup problem such as a host key or a
+// key that ssh refused, which no retry fixes.
+func Dropped(err error) bool {
+	var d *droppedError
+	return errors.As(err, &d)
+}
+
 // sshError explains why ssh failed. Fix lines name the address, because the
 // user runs them by hand.
-func (h *Host) sshError(ctx context.Context, stderr string) error {
+func (h *Host) sshError(ctx context.Context, stderr string) *output.Error {
 	u, host, port, err := h.resolved(ctx)
 	if err != nil {
 		u, host, port = "", h.name, ""
@@ -310,6 +347,10 @@ func (s *Store) sshOptions() []string {
 		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "ConnectTimeout=10",
+		// A connection that stops answering ends within 30 seconds instead
+		// of holding a call until its own deadline.
+		"-o", "ServerAliveInterval=10",
+		"-o", "ServerAliveCountMax=3",
 	)
 }
 

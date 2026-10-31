@@ -142,12 +142,14 @@ func exitOf(s *output.Summary) error {
 	return output.Silent(output.Code(*s.Exit))
 }
 
-// summaryCall runs a status or cancel call and returns its summary.
-func (a *App) summaryCall(ctx context.Context, proj *project, action, id string) (*agent.Reply, error) {
-	if err := a.connect(ctx, proj.host); err != nil {
-		return nil, err
-	}
-	reply, err := a.short(ctx, proj.host, withID(proj.call(action), id)...)
+// caller makes one executor call: short for one that acts, read for one
+// that only reads.
+type caller func(ctx context.Context, h *hosts.Host, args ...string) (*agent.Reply, error)
+
+// summaryCall runs a status, failures or cancel call and returns its
+// summary.
+func (a *App) summaryCall(ctx context.Context, proj *project, call caller, action, id string) (*agent.Reply, error) {
+	reply, err := call(ctx, proj.host, withID(proj.call(action), id)...)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +249,7 @@ func (w *waiter) next(ctx context.Context, maxWait time.Duration) (*output.Summa
 		if w.failures == len(pauses()) || ctx.Err() != nil {
 			return nil, err
 		}
-		w.pause(ctx, pauses()[w.failures])
+		pause(ctx, pauses()[w.failures])
 		w.failures++
 		return nil, errRetry
 	}
@@ -274,7 +276,7 @@ func (w *waiter) call(ctx context.Context, maxWait time.Duration) (*agent.Reply,
 }
 
 // pause waits d, or less when ctx ends first.
-func (w *waiter) pause(ctx context.Context, d time.Duration) {
+func pause(ctx context.Context, d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -326,7 +328,7 @@ func (a *App) status(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "status", id)
+	reply, err := a.summaryCall(ctx, proj, a.read, "status", id)
 	if err != nil {
 		return err
 	}
@@ -381,14 +383,11 @@ func (a *App) log(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	if err := a.connect(ctx, proj.host); err != nil {
-		return err
-	}
 	args := proj.call(cmdLog, "--step", r.step, "--tail", p.flags["tail"], "--context", p.flags["context"])
 	if r.grep != "" {
 		args = append(args, "--grep", r.grep)
 	}
-	reply, err := a.short(ctx, proj.host, withID(args, r.id)...)
+	reply, err := a.read(ctx, proj.host, withID(args, r.id)...)
 	if err != nil {
 		return err
 	}
@@ -419,7 +418,10 @@ func (a *App) cancel(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "cancel", id)
+	if err := a.connect(ctx, proj.host); err != nil {
+		return err
+	}
+	reply, err := a.summaryCall(ctx, proj, a.short, "cancel", id)
 	if err != nil {
 		return err
 	}
@@ -439,7 +441,7 @@ func (a *App) failures(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "failures", id)
+	reply, err := a.summaryCall(ctx, proj, a.read, "failures", id)
 	if err != nil {
 		return err
 	}

@@ -660,3 +660,53 @@ func TestRunNoDefaultPipeline(t *testing.T) {
 		t.Fatalf("unknown step: %d %q", r.Code, r.Stderr)
 	}
 }
+
+// failTOML is a step that fails without a report, so its summary is the
+// tail of its log.
+const failTOML = `
+[pipelines]
+default = ["e2e"]
+
+[steps.e2e]
+run = "echo cohorts are listed; exit 1"
+`
+
+func TestReadsSurviveDroppedSSH(t *testing.T) {
+	w := ready(t, failTOML, nil)
+	w.must(v1, argRun)
+	if r := w.burro(v1, argWait); r.Code != 1 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	log := runsDir + "/r1/e2e.log"
+	for _, tt := range []struct {
+		args []string
+		code int
+	}{
+		{args: []string{argFails, "r1"}, code: 1},
+		{args: []string{cmdLog, "r1", argStep, argE2E, argGrep, "cohorts"}, code: 0},
+		{args: []string{argStatus, "r1"}, code: 1},
+	} {
+		// Opening a FIFO blocks until someone writes it, so the call is
+		// still on the server when the connection drops.
+		blocked := log
+		if tt.args[0] == argStatus {
+			blocked = runsDir + "/r1/status.json"
+		}
+		saved := w.srv.Exec(t, "cat", blocked)
+		w.srv.Exec(t, "sh", "-c", `rm "$1" && mkfifo "$1"`, "sh", blocked)
+		done := make(chan testutil.Result, 1)
+		go func() { done <- w.burro(v1, tt.args...) }()
+		testutil.Poll(t, 30*time.Second, func() error {
+			if len(w.serverPids("agent "+tt.args[0])) == 0 {
+				return errors.New("no executor call on the server yet")
+			}
+			return nil
+		})
+		w.dropSSH()
+		w.srv.Exec(t, "sh", "-c", `rm "$1" && printf '%s\n' "$2" >"$1"`, "sh", blocked, saved)
+		r := <-done
+		if r.Code != tt.code || r.Stderr != "" || !strings.Contains(r.Stdout, "cohorts are listed") && tt.args[0] != argStatus {
+			t.Fatalf("%q after a dropped connection: exit %d\nstdout %q\nstderr %q", tt.args, r.Code, r.Stdout, r.Stderr)
+		}
+	}
+}
