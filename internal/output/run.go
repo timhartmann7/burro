@@ -42,6 +42,18 @@ type Started struct {
 	Args     []string `json:"args,omitempty"`
 	Synced   int      `json:"synced"`
 	Seconds  float64  `json:"seconds"`
+	// Near are the steps whose last passing run took most of their
+	// timeout, so this run may hit it.
+	Near []NearTimeout `json:"near_timeout,omitempty"`
+}
+
+// NearTimeout is a step whose last passing run, Run, took Seconds of its
+// Timeout seconds.
+type NearTimeout struct {
+	Step    string `json:"step"`
+	Run     string `json:"run"`
+	Seconds int    `json:"seconds"`
+	Timeout int    `json:"timeout"`
 }
 
 // Started prints the run line, the sync line and the steps that will run.
@@ -58,6 +70,10 @@ func (p *Printer) Started(s *Started, took time.Duration) error {
 		s.Run, s.Pipeline, s.Tree, StateRunning, s.Synced, files, Duration(took), strings.Join(s.Steps, " "))
 	if len(s.Args) > 0 {
 		text += "args: " + strings.Join(s.Args, " ") + "\n"
+	}
+	for _, n := range s.Near {
+		text += fmt.Sprintf("%s took %s in %s, its timeout is %s\n", n.Step,
+			Duration(time.Duration(n.Seconds)*time.Second), n.Run, Duration(time.Duration(n.Timeout)*time.Second))
 	}
 	return p.write(text)
 }

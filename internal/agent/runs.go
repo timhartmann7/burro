@@ -140,12 +140,32 @@ func (e *Executor) start(args []string) (*output.Started, error) {
 				started.Steps = append(started.Steps, st.Name)
 			}
 		}
+		started.Near = nearTimeouts(proj, id, selected)
 		if err := proj.WriteStatus(status); err != nil {
 			return err
 		}
 		return e.launch(proj, dir, id, secrets)
 	})
 	return started, err
+}
+
+// nearTimeouts lists the steps of the run whose last passing run took at
+// least 80 % of their timeout. A run that hits the timeout loses all of
+// it, so the agent hears of the risk before, not after.
+func nearTimeouts(proj *report.Project, id string, selected []config.Selected) []output.NearTimeout {
+	var near []output.NearTimeout
+	for i := range selected {
+		step := &selected[i].Step
+		if selected[i].Skip != "" {
+			continue
+		}
+		run, seconds, found := proj.LastPassed(id, step.Name)
+		timeout := int(step.Timeout.Seconds())
+		if found && seconds*5 >= timeout*4 {
+			near = append(near, output.NearTimeout{Step: step.Name, Run: run, Seconds: seconds, Timeout: timeout})
+		}
+	}
+	return near
 }
 
 // readSecrets reads the secrets the client sends on stdin as one JSON

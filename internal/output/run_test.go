@@ -35,6 +35,13 @@ func runResults() map[string]func(p *output.Printer) error {
 		"run-started-one": func(p *output.Printer) error {
 			return p.Started(&output.Started{Run: "r1", Pipeline: pipelineDefault, Tree: "abcdef1", Steps: []string{stepTest}, Synced: 1}, 12*time.Second)
 		},
+		"run-started-args": func(p *output.Printer) error {
+			return p.Started(&output.Started{
+				Run: "r16", Pipeline: pipelineVerify, Tree: shortTree, Steps: []string{stepE2E}, Synced: 2,
+				Args: []string{"tests/booking-consent.spec.ts", "--project=chromium"},
+				Near: []output.NearTimeout{{Step: stepE2E, Run: "r13", Seconds: 54 * 60, Timeout: 60 * 60}},
+			}, 900*time.Millisecond)
+		},
 		"summary-failed": func(p *output.Printer) error {
 			return p.Summary(&output.Summary{
 				Run: run42, Pipeline: pipelineVerify, Tree: shortTree, State: output.StateDone, Exit: exit(1), Seconds: 41 * 60,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -196,6 +197,56 @@ func TestStartWithArgs(t *testing.T) {
 	f := s.fails(output.ExitUsage, actStart, argPath, appPath, "--tree", fullTree, pipeline, "x")
 	if !strings.Contains(f.Message, "go to one step") || len(s.runs()) != 1 {
 		t.Fatalf("args for three steps: %+v, runs %v", f, s.runs())
+	}
+}
+
+func TestStartNearTimeout(t *testing.T) {
+	s := newServer(t, testutil.BuildBurro(t), toml("30"))
+	proj := report.Open(s.dir)
+	// Earlier runs: unit took 50 of its 60 minutes in r2, 59 in a run with
+	// arguments after it, and failed in the newest.
+	for _, prev := range []struct {
+		state   string
+		seconds int
+		args    []string
+	}{
+		{output.StateOK, 3000, nil},
+		{output.StateOK, 2000, nil},
+		{output.StateOK, 3540, []string{"a.spec.ts"}},
+		{output.StateFail, 3599, nil},
+	} {
+		id, err := proj.NewRun()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		st := &report.Status{
+			Run: id, Pipeline: pipeline, State: output.StateDone, Exit: new(int), Started: now, Finished: &now, Args: prev.args,
+			Steps: []report.Step{{Name: stepUnit, State: prev.state, Seconds: prev.seconds}, {Name: "lint", State: output.StateOK, Seconds: 1}},
+		}
+		if err := proj.WriteStatus(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := s.start(pipeline)
+	s.done(started.Run)
+	if len(started.Near) != 0 {
+		t.Fatalf("2000 of 3600 seconds is no risk: %+v", started.Near)
+	}
+	// r5 passed unit fast; take its place with a slow pass.
+	st, err := proj.Status(started.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Steps[0].Seconds = 2880
+	if err := proj.WriteStatus(st); err != nil {
+		t.Fatal(err)
+	}
+	started = s.start(pipeline)
+	s.done(started.Run)
+	want := []output.NearTimeout{{Step: stepUnit, Run: "r5", Seconds: 2880, Timeout: 3600}}
+	if !slices.Equal(started.Near, want) {
+		t.Fatalf("near %+v, want %+v", started.Near, want)
 	}
 }
 
