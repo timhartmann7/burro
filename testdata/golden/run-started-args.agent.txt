@@ -1,0 +1,5 @@
+r16 verify · tree 5530df9 · running
+synced 2 files in 0.9s
+steps: e2e
+args: tests/booking-consent.spec.ts --project=chromium
+e2e took 54m in r13, its timeout is 1h00m

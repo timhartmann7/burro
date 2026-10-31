@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,7 +62,7 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	selected, err := proj.cfg.Select(pipeline, from, onlyList)
+	selected, err := proj.cfg.Select(pipeline, from, onlyList, p.passed)
 	if err != nil {
 		return err
 	}
@@ -90,9 +91,12 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if hasOnly {
 		args = append(args, "--only", only)
 	}
+	// The step's arguments come after the pipeline, where the executor's
+	// flags end.
+	args = append(append(args, pipeline), p.passed...)
 	startCtx, cancel := context.WithTimeout(ctx, shortTimeout)
 	defer cancel()
-	reply, err := a.call(startCtx, proj.host, stdin, append(args, pipeline)...)
+	reply, err := a.call(startCtx, proj.host, stdin, args...)
 	if err != nil {
 		return err
 	}
@@ -142,12 +146,14 @@ func exitOf(s *output.Summary) error {
 	return output.Silent(output.Code(*s.Exit))
 }
 
-// summaryCall runs a status or cancel call and returns its summary.
-func (a *App) summaryCall(ctx context.Context, proj *project, action, id string) (*agent.Reply, error) {
-	if err := a.connect(ctx, proj.host); err != nil {
-		return nil, err
-	}
-	reply, err := a.short(ctx, proj.host, withID(proj.call(action), id)...)
+// caller makes one executor call: short for one that acts, read for one
+// that only reads.
+type caller func(ctx context.Context, h *hosts.Host, args ...string) (*agent.Reply, error)
+
+// summaryCall runs a status, failures or cancel call and returns its
+// summary.
+func (a *App) summaryCall(ctx context.Context, proj *project, call caller, action, id string) (*agent.Reply, error) {
+	reply, err := call(ctx, proj.host, withID(proj.call(action), id)...)
 	if err != nil {
 		return nil, err
 	}
@@ -162,10 +168,16 @@ func (a *App) wait(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	timeout, err := time.ParseDuration(p.flags["timeout"])
-	if err != nil || timeout <= 0 {
-		return output.NewError(output.ExitUsage, fmt.Sprintf("wait: --timeout %q is not a positive duration", p.flags["timeout"]),
-			"pass a duration, for example --timeout 30m")
+	// Without --timeout, wait lasts as long as the run: the step timeouts
+	// and the heartbeat already end every run.
+	var deadline time.Time
+	if value, ok := p.flags["timeout"]; ok {
+		timeout, err := time.ParseDuration(value)
+		if err != nil || timeout <= 0 {
+			return output.NewError(output.ExitUsage, fmt.Sprintf("wait: --timeout %q is not a positive duration", value),
+				"pass a duration, for example --timeout 30m")
+		}
+		deadline = time.Now().Add(timeout)
 	}
 	proj, err := a.project(ctx)
 	if err != nil {
@@ -180,7 +192,7 @@ func (a *App) wait(ctx context.Context, p *parsed) error {
 		ctx, stop = signal.NotifyContext(ctx, os.Interrupt)
 		defer stop()
 	}
-	sum, err := w.loop(ctx, time.Now().Add(timeout))
+	sum, err := w.loop(ctx, deadline)
 	w.line.clear()
 	if errors.Is(err, errInterrupted) {
 		// stderr is the terminal of the person who pressed Ctrl+C; when it
@@ -216,15 +228,18 @@ type waiter struct {
 
 // loop returns the summary of the finished run. A canceled ctx, which is
 // Ctrl+C in human mode, or the deadline end it early; the run goes on
-// either way.
+// either way. A zero deadline never comes.
 func (w *waiter) loop(ctx context.Context, deadline time.Time) (*output.Summary, error) {
 	for {
-		left := time.Until(deadline).Round(time.Second)
+		left := waitCall
+		if !deadline.IsZero() {
+			left = min(left, time.Until(deadline).Round(time.Second))
+		}
 		if left <= 0 {
 			return nil, output.NewError(output.ExitRunning, fmt.Sprintf("%s is still running", w.shown()),
 				fmt.Sprintf("run burro wait %s again; the run keeps going", w.id))
 		}
-		sum, err := w.next(ctx, min(left, waitCall))
+		sum, err := w.next(ctx, left)
 		if ctx.Err() != nil {
 			return nil, errInterrupted
 		}
@@ -247,7 +262,7 @@ func (w *waiter) next(ctx context.Context, maxWait time.Duration) (*output.Summa
 		if w.failures == len(pauses()) || ctx.Err() != nil {
 			return nil, err
 		}
-		w.pause(ctx, pauses()[w.failures])
+		pause(ctx, pauses()[w.failures])
 		w.failures++
 		return nil, errRetry
 	}
@@ -274,7 +289,7 @@ func (w *waiter) call(ctx context.Context, maxWait time.Duration) (*agent.Reply,
 }
 
 // pause waits d, or less when ctx ends first.
-func (w *waiter) pause(ctx context.Context, d time.Duration) {
+func pause(ctx context.Context, d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -326,7 +341,7 @@ func (a *App) status(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "status", id)
+	reply, err := a.summaryCall(ctx, proj, a.read, "status", id)
 	if err != nil {
 		return err
 	}
@@ -381,14 +396,11 @@ func (a *App) log(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	if err := a.connect(ctx, proj.host); err != nil {
-		return err
-	}
 	args := proj.call(cmdLog, "--step", r.step, "--tail", p.flags["tail"], "--context", p.flags["context"])
 	if r.grep != "" {
 		args = append(args, "--grep", r.grep)
 	}
-	reply, err := a.short(ctx, proj.host, withID(args, r.id)...)
+	reply, err := a.read(ctx, proj.host, withID(args, r.id)...)
 	if err != nil {
 		return err
 	}
@@ -419,7 +431,10 @@ func (a *App) cancel(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "cancel", id)
+	if err := a.connect(ctx, proj.host); err != nil {
+		return err
+	}
+	reply, err := a.summaryCall(ctx, proj, a.short, "cancel", id)
 	if err != nil {
 		return err
 	}
@@ -439,7 +454,7 @@ func (a *App) failures(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	reply, err := a.summaryCall(ctx, proj, "failures", id)
+	reply, err := a.summaryCall(ctx, proj, a.read, "failures", id)
 	if err != nil {
 		return err
 	}
@@ -481,4 +496,48 @@ func positive(p *parsed, cmd, flag string) (int, error) {
 			fmt.Sprintf("pass a number of lines, for example --%s 100", flag))
 	}
 	return n, nil
+}
+
+// pullFolder is where pull puts what it copies, inside the repository.
+const pullFolder = ".burro/pull"
+
+// pull copies the files of the project folder on the server that the
+// patterns match into .burro/pull, which it empties first, so the folder
+// holds exactly what this pull brought.
+func (a *App) pull(ctx context.Context, p *parsed) error {
+	proj, err := a.project(ctx)
+	if err != nil {
+		return err
+	}
+	if err := proj.store.CheckRsync(ctx); err != nil {
+		return err
+	}
+	// -- keeps a pattern that starts with a dash from reading as a flag.
+	reply, err := a.read(ctx, proj.host, proj.call("files", append([]string{"--"}, p.args...)...)...)
+	if err != nil {
+		return err
+	}
+	pulled := reply.Pulled
+	if pulled == nil {
+		return noResult(proj.host, "pull")
+	}
+	local := filepath.Join(proj.repo.Root(), filepath.FromSlash(pullFolder))
+	if err := os.RemoveAll(local); err != nil {
+		return fmt.Errorf("empty %s: %w", pullFolder, err)
+	}
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", pullFolder, err)
+	}
+	// Git leaves the folder out even where .gitignore lacks .burro/, so the
+	// tree hash and the next sync never see these files.
+	if err := os.WriteFile(filepath.Join(local, ".gitignore"), []byte("*\n"), 0o600); err != nil {
+		return fmt.Errorf("create %s: %w", pullFolder, err)
+	}
+	longCtx, cancel := context.WithTimeout(ctx, longTimeout)
+	defer cancel()
+	if err := proj.host.Pull(longCtx, proj.cfg.Dir(), pulled.Files, local); err != nil {
+		return err
+	}
+	pulled.Folder = pullFolder
+	return p.print.Pulled(pulled)
 }

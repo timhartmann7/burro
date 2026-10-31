@@ -384,7 +384,9 @@ junit = "out/unit.xml"
 	if all := w.burro(v1, argFails, "--max-lines", "1000"); all.Code != 1 || strings.Count(all.Stdout, "  NEW   ") != 300 || strings.Contains(all.Stdout, "more: burro failures") {
 		t.Fatalf("all: %d %d", all.Code, strings.Count(all.Stdout, "  NEW   "))
 	}
-	if r := w.burro(v1, argFails, "--max-lines", "40", argJSON); r.Code != 1 || !strings.Contains(r.Stdout, fmt.Sprintf(`"hidden":%d`, 300-shown)) || strings.Count(r.Stdout, "\n") != 1 {
+	// Lines measure text; JSON carries every failure whatever --max-lines.
+	if r := w.burro(v1, argFails, "--max-lines", "40", argJSON); r.Code != 1 || !strings.Contains(r.Stdout, `"hidden":0`) ||
+		strings.Count(r.Stdout, `"kind":"NEW"`) != 300 || strings.Count(r.Stdout, "\n") != 1 {
 		t.Fatalf("json: %q", r.Stdout)
 	}
 }

@@ -51,6 +51,8 @@ type Status struct {
 	Finished  *time.Time `json:"finished"`
 	Heartbeat time.Time  `json:"heartbeat"`
 	Steps     []Step     `json:"steps"`
+	// Args go to the end of the command of the run's one step.
+	Args []string `json:"args,omitempty"`
 }
 
 // Step is one step of status.json.

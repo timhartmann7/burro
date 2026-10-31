@@ -548,3 +548,82 @@ func TestExecLeftover(t *testing.T) {
 		t.Fatalf("code %d out %q err %v after %s", code, out.String(), err, time.Since(start))
 	}
 }
+
+// withArgs gives the prepared run step arguments, the way start records
+// them.
+func (p *project) withArgs(req request, args ...string) request {
+	p.t.Helper()
+	s, err := p.proj.Status(req.id)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	s.Args = args
+	if err := p.proj.WriteStatus(s); err != nil {
+		p.t.Fatal(err)
+	}
+	return req
+}
+
+func TestStepArgs(t *testing.T) {
+	p := newProject(t, `
+[pipelines]
+default = ["e2e"]
+
+[steps.e2e]
+run = """
+printf '[%s]' first
+"""
+`)
+	// Spaces, quotes, $(...) and a leading dash stay one argument each and
+	// never become shell code.
+	args := []string{"tests/a b.spec.ts", `it's "quoted"`, "$(touch pwned)", "-v"}
+	s := p.run(context.Background(), testRunner(), p.withArgs(p.prepare([]string{"e2e"}, nil), args...))
+	want := `[first][tests/a b.spec.ts][it's "quoted"][$(touch pwned)][-v]`
+	if s.Steps[0].State != ok || p.log(s.Run, "e2e") != want {
+		t.Fatalf("step %+v, log %q, want %q", s.Steps[0], p.log(s.Run, "e2e"), want)
+	}
+	if _, err := os.Stat(filepath.Join(p.dir, "pwned")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an argument ran as a command: %v", err)
+	}
+	// Without arguments the command is what burro.toml says.
+	if s := p.run(context.Background(), testRunner(), p.prepare([]string{"e2e"}, nil)); p.log(s.Run, "e2e") != "[first]" {
+		t.Fatalf("plain run logged %q", p.log(s.Run, "e2e"))
+	}
+}
+
+func TestStepArgsSkipNoCache(t *testing.T) {
+	p := newProject(t, `
+[pipelines]
+default = ["install"]
+
+[steps.install]
+run = "echo ran >> runs.txt"
+skip_if_unchanged = ["lock.txt"]
+`)
+	p.write(lockFile, "v1")
+	runs := []struct {
+		name string
+		args []string
+		want string
+	}{
+		// A part of the work must not let the next full run skip it.
+		{name: "with arguments first", args: []string{"--filter", "a"}, want: ok},
+		{name: "full run", want: ok},
+		{name: "full run again", want: output.StateSkip},
+		// Arguments ask for work, so a matching cache doesn't skip it.
+		{name: "with arguments after a full run", args: []string{"--filter", "a"}, want: ok},
+		{name: "full run after that", want: output.StateSkip},
+	}
+	for _, r := range runs {
+		req := p.prepare([]string{"install"}, nil)
+		if r.args != nil {
+			req = p.withArgs(req, r.args...)
+		}
+		if got := p.run(context.Background(), testRunner(), req).Steps[0]; got.State != r.want {
+			t.Fatalf("%s: %+v, want %s", r.name, got, r.want)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(p.dir, "runs.txt")); string(got) != "ran --filter a\nran\nran --filter a\n" {
+		t.Fatalf("the step ran %q", got)
+	}
+}

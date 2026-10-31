@@ -273,6 +273,7 @@ func (a *App) help() string {
 	}))
 	b.WriteString("\nburro <command> --help   details and an example\n")
 	b.WriteString("burro help config        burro.toml fields and test reporters\n")
+	b.WriteString("--json on any command    one JSON object instead of text\n")
 	return b.String()
 }
 

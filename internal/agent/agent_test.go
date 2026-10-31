@@ -25,7 +25,7 @@ func project(t *testing.T) (home, dir string) {
 	return home, dir
 }
 
-func call(t *testing.T, home, stdin string, args ...string) agent.Reply {
+func call(t *testing.T, home, stdin string, args ...string) *agent.Reply {
 	t.Helper()
 	var out strings.Builder
 	if err := agent.New(strings.NewReader(stdin), &out, home, nil, "", runner.Exec, runner.Clean).Run(args); err != nil {
@@ -38,12 +38,12 @@ func call(t *testing.T, home, stdin string, args ...string) agent.Reply {
 	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
 		t.Fatalf("reply %q: %v", out.String(), err)
 	}
-	return reply
+	return &reply
 }
 
 // execCall is the argument list of one exec call with a command.
 func execCall(path, lines string, argv ...string) []string {
-	return append([]string{action, "--path", path, "--max-lines", lines, "--"}, argv...)
+	return append([]string{action, argPath, path, "--max-lines", lines, "--"}, argv...)
 }
 
 // scriptCall is the argument list of one exec call with a script on stdin.
@@ -56,7 +56,7 @@ const (
 	action  = "exec"
 )
 
-func execOK(t *testing.T, reply agent.Reply) *output.Exec {
+func execOK(t *testing.T, reply *agent.Reply) *output.Exec {
 	t.Helper()
 	if reply.Error != nil || reply.Exec == nil {
 		t.Fatalf("reply %+v, error %+v", reply.Exec, reply.Error)

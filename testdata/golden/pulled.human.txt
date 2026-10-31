@@ -1,0 +1,22 @@
+pulled 25 files, 3.4 MB, into .burro/pull
+.burro/pull/test-results/login-chromium/trace.zip
+.burro/pull/test-results/login-chromium/test-failed-1.png
+.burro/pull/test-results/cart-00/test-failed-1.png
+.burro/pull/test-results/cart-01/test-failed-1.png
+.burro/pull/test-results/cart-02/test-failed-1.png
+.burro/pull/test-results/cart-03/test-failed-1.png
+.burro/pull/test-results/cart-04/test-failed-1.png
+.burro/pull/test-results/cart-05/test-failed-1.png
+.burro/pull/test-results/cart-06/test-failed-1.png
+.burro/pull/test-results/cart-07/test-failed-1.png
+.burro/pull/test-results/cart-08/test-failed-1.png
+.burro/pull/test-results/cart-09/test-failed-1.png
+.burro/pull/test-results/cart-10/test-failed-1.png
+.burro/pull/test-results/cart-11/test-failed-1.png
+.burro/pull/test-results/cart-12/test-failed-1.png
+.burro/pull/test-results/cart-13/test-failed-1.png
+.burro/pull/test-results/cart-14/test-failed-1.png
+.burro/pull/test-results/cart-15/test-failed-1.png
+.burro/pull/test-results/cart-16/test-failed-1.png
+.burro/pull/test-results/cart-17/test-failed-1.png
++5 more in .burro/pull

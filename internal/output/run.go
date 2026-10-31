@@ -39,8 +39,21 @@ type Started struct {
 	Pipeline string   `json:"pipeline"`
 	Tree     string   `json:"tree"`
 	Steps    []string `json:"steps"`
+	Args     []string `json:"args,omitempty"`
 	Synced   int      `json:"synced"`
 	Seconds  float64  `json:"seconds"`
+	// Near are the steps whose last passing run took most of their
+	// timeout, so this run may hit it.
+	Near []NearTimeout `json:"near_timeout,omitempty"`
+}
+
+// NearTimeout is a step whose last passing run, Run, took Seconds of its
+// Timeout seconds.
+type NearTimeout struct {
+	Step    string `json:"step"`
+	Run     string `json:"run"`
+	Seconds int    `json:"seconds"`
+	Timeout int    `json:"timeout"`
 }
 
 // Started prints the run line, the sync line and the steps that will run.
@@ -49,12 +62,16 @@ func (p *Printer) Started(s *Started, took time.Duration) error {
 	if p.json {
 		return p.writeJSON(s)
 	}
-	files := "files"
-	if s.Synced == 1 {
-		files = "file"
+	text := fmt.Sprintf("%s %s · tree %s · %s\nsynced %s in %s\nsteps: %s\n",
+		s.Run, s.Pipeline, s.Tree, StateRunning, files(s.Synced), Duration(took), strings.Join(s.Steps, " "))
+	if len(s.Args) > 0 {
+		text += "args: " + strings.Join(s.Args, " ") + "\n"
 	}
-	return p.write(fmt.Sprintf("%s %s · tree %s · %s\nsynced %d %s in %s\nsteps: %s\n",
-		s.Run, s.Pipeline, s.Tree, StateRunning, s.Synced, files, Duration(took), strings.Join(s.Steps, " ")))
+	for _, n := range s.Near {
+		text += fmt.Sprintf("%s took %s in %s, its timeout is %s\n", n.Step,
+			Duration(time.Duration(n.Seconds)*time.Second), n.Run, Duration(time.Duration(n.Timeout)*time.Second))
+	}
+	return p.write(text)
 }
 
 // Summary is the state of one run: what status, wait and cancel print.
@@ -132,11 +149,13 @@ const moreFactor = 10
 // one line per step and under each failed step its failures or log tail.
 // With maxLines above 0 everything fits in that many lines; the last line
 // then says how many failures stayed out and which command shows them.
+// Lines are a measure of text, so JSON carries every failure the server
+// sent.
 func (p *Printer) Summary(s *Summary, maxLines int) error {
-	s = s.fit(maxLines)
 	if p.json {
-		return p.writeJSON(s)
+		return p.writeJSON(s.fit(0))
 	}
+	s = s.fit(maxLines)
 	var b strings.Builder
 	b.WriteString(s.Headline() + "\n")
 	if s.Local != "" {
@@ -186,6 +205,10 @@ func (p *Printer) stepLine(st *SummaryStep, nameWidth, stateWidth int) string {
 	cols := []string{fmt.Sprintf("%-*s", nameWidth, st.Name), state}
 	if st.Tests != nil {
 		cols = append(cols, fmt.Sprintf("%d/%d", st.Tests.Passed, st.Tests.Total))
+		// Passed of total alone reads skipped tests as failed ones.
+		if st.Tests.Skipped > 0 {
+			cols = append(cols, fmt.Sprintf("%d skipped", st.Tests.Skipped))
+		}
 	}
 	if st.State == StateOK || st.State == StateFail || st.State == StateRunning {
 		cols = append(cols, Duration(time.Duration(st.Seconds)*time.Second))
@@ -383,6 +406,42 @@ func (p *Printer) Cleaned(c *Cleaned) error {
 		list = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 	}
 	return p.write(c.Run + " · removed " + list + "\n")
+}
+
+// files is n with the word file, singular for one.
+func files(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
+// Pulled is what pull copied from the server: Files, paths relative to
+// the project folder, now inside the local Folder.
+type Pulled struct {
+	Folder string   `json:"folder"`
+	Files  []string `json:"files"`
+	Bytes  int64    `json:"bytes"`
+}
+
+// pulledShown is how many file lines pull prints before the rest line.
+const pulledShown = 20
+
+// Pulled prints the count, the size and the folder, then the local path of
+// the first files, ready to open.
+func (p *Printer) Pulled(r *Pulled) error {
+	if p.json {
+		return p.writeJSON(r)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "pulled %s, %.1f MB, into %s\n", files(len(r.Files)), float64(r.Bytes)/1e6, r.Folder)
+	for _, f := range r.Files[:min(len(r.Files), pulledShown)] {
+		b.WriteString(r.Folder + "/" + f + "\n")
+	}
+	if hidden := len(r.Files) - pulledShown; hidden > 0 {
+		fmt.Fprintf(&b, "+%d more in %s\n", hidden, r.Folder)
+	}
+	return p.write(b.String())
 }
 
 // What init did to a file.

@@ -108,20 +108,22 @@ func (e *Executor) start(args []string) (*output.Started, error) {
 	f.set.StringVar(&treeHash, "tree", "", "tree hash")
 	f.set.StringVar(&from, "from", "", "first step")
 	f.set.StringVar(&only, "only", "", "steps to run")
-	pipeline, err := f.parse(args)
-	if err != nil {
-		return nil, err
+	// The pipeline ends the flags; whatever follows goes to its one step.
+	if err := f.set.Parse(args); err != nil || f.path == "" || f.set.NArg() == 0 {
+		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("agent start: bad arguments %q", args),
+			"rerun with the same burro version")
 	}
+	pipeline, stepArgs := f.set.Arg(0), f.set.Args()[1:]
 	secrets, err := e.readSecrets()
 	if err != nil {
 		return nil, err
 	}
-	dir, selected, err := e.selection(f.path, pipeline, from, only)
+	dir, selected, err := e.selection(f.path, pipeline, from, only, stepArgs)
 	if err != nil {
 		return nil, err
 	}
 	proj := report.Open(dir)
-	started := &output.Started{Pipeline: pipeline, Tree: short(treeHash), Steps: []string{}}
+	started := &output.Started{Pipeline: pipeline, Tree: short(treeHash), Steps: []string{}, Args: stepArgs}
 	err = proj.Locked(func() error {
 		if id := proj.Holder(); id != "" {
 			return report.Busy(id)
@@ -132,17 +134,38 @@ func (e *Executor) start(args []string) (*output.Started, error) {
 		}
 		started.Run = id
 		status := newStatus(id, pipeline, treeHash, selected)
+		status.Args = stepArgs
 		for _, st := range status.Steps {
 			if st.State == output.StatePending {
 				started.Steps = append(started.Steps, st.Name)
 			}
 		}
+		started.Near = nearTimeouts(proj, id, selected)
 		if err := proj.WriteStatus(status); err != nil {
 			return err
 		}
 		return e.launch(proj, dir, id, secrets)
 	})
 	return started, err
+}
+
+// nearTimeouts lists the steps of the run whose last passing run took at
+// least 80 % of their timeout. A run that hits the timeout loses all of
+// it, so the agent hears of the risk before, not after.
+func nearTimeouts(proj *report.Project, id string, selected []config.Selected) []output.NearTimeout {
+	var near []output.NearTimeout
+	for i := range selected {
+		step := &selected[i].Step
+		if selected[i].Skip != "" {
+			continue
+		}
+		run, seconds, found := proj.LastPassed(id, step.Name)
+		timeout := int(step.Timeout.Seconds())
+		if found && seconds*5 >= timeout*4 {
+			near = append(near, output.NearTimeout{Step: step.Name, Run: run, Seconds: seconds, Timeout: timeout})
+		}
+	}
+	return near
 }
 
 // readSecrets reads the secrets the client sends on stdin as one JSON
@@ -173,7 +196,7 @@ func (e *Executor) readSecrets() (map[string][]byte, error) {
 
 // selection reads burro.toml in the project folder and selects the steps
 // of the run, the same way the client checked them.
-func (e *Executor) selection(path, pipeline, from, only string) (string, []config.Selected, error) {
+func (e *Executor) selection(path, pipeline, from, only string, args []string) (string, []config.Selected, error) {
 	dir, err := e.projectDir(path)
 	if err != nil {
 		return "", nil, err
@@ -186,7 +209,7 @@ func (e *Executor) selection(path, pipeline, from, only string) (string, []confi
 	if only != "" {
 		onlyList = strings.Split(only, ",")
 	}
-	selected, err := cfg.Select(pipeline, from, onlyList)
+	selected, err := cfg.Select(pipeline, from, onlyList, args)
 	return dir, selected, err
 }
 

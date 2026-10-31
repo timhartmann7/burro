@@ -21,6 +21,10 @@ const (
 	// shortTimeout bounds one short ssh call. ssh gives up connecting after
 	// 10 seconds on its own.
 	shortTimeout = 30 * time.Second
+	// readTimeout bounds one call that reads logs and reports. It outlasts
+	// the 30 seconds in which ssh notices a dead connection, so a dead one
+	// fails as broken and is asked again, while a slow server is not.
+	readTimeout = 2 * time.Minute
 	// uploadTimeout bounds copying the server binary over a slow link.
 	uploadTimeout = 5 * time.Minute
 	// longTimeout bounds exec and rsync, matching the default step timeout.
@@ -145,6 +149,33 @@ func (a *App) short(ctx context.Context, h *hosts.Host, args ...string) (*agent.
 	ctx, cancel := context.WithTimeout(ctx, shortTimeout)
 	defer cancel()
 	return a.call(ctx, h, nil, args...)
+}
+
+// read makes sure the host runs this version's server binary, then makes
+// a call without stdin that only reads on the server, so asking again is
+// safe. A dropped connection gets the pauses of wait before the next try.
+// A call that ran out of time is not repeated, because the next one would
+// take as long, and neither is a setup problem such as a host key.
+func (a *App) read(ctx context.Context, h *hosts.Host, args ...string) (*agent.Reply, error) {
+	for i := 0; ; i++ {
+		reply, err := a.readOnce(ctx, h, args)
+		if err == nil {
+			return reply, replyError(h, reply)
+		}
+		if !hosts.Dropped(err) || i == len(pauses()) || ctx.Err() != nil {
+			return nil, err
+		}
+		pause(ctx, pauses()[i])
+	}
+}
+
+func (a *App) readOnce(ctx context.Context, h *hosts.Host, args []string) (*agent.Reply, error) {
+	if err := a.connect(ctx, h); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
+	return exchange(ctx, h, nil, nil, args...)
 }
 
 // exchange runs one agent call and parses its last line as the reply.

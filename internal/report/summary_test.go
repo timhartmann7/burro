@@ -193,6 +193,30 @@ func TestSummaryNewAndSeen(t *testing.T) {
 	}
 }
 
+func TestSummaryPartialRunIsNoBaseline(t *testing.T) {
+	dir := t.TempDir()
+	p := report.Open(dir)
+	reportRun(t, p, dir, verify, map[string][]string{stepUnit: {jestXML}})
+	// A run of a few tests passes them on and a canceled run stops before
+	// them: neither says anything of the others.
+	partial := reportRun(t, p, dir, verify, map[string][]string{stepUnit: {pytestXML}})
+	partial.Args = []string{"tests/test_calc.py"}
+	if err := p.WriteStatus(partial); err != nil {
+		t.Fatal(err)
+	}
+	canceled := reportRun(t, p, dir, verify, map[string][]string{stepUnit: {}})
+	canceled.State, canceled.Reason = output.StateCanceled, output.StateCanceled
+	if err := p.WriteStatus(canceled); err != nil {
+		t.Fatal(err)
+	}
+	sum := details(t, p, reportRun(t, p, dir, verify, map[string][]string{stepUnit: {jestXML}}))
+	for _, f := range sum.Failures {
+		if f.Kind != output.KindSeen {
+			t.Fatalf("%s is %s after the full run that had it", f.Name, f.Kind)
+		}
+	}
+}
+
 // acceptance: S3-04
 func TestSummaryBrokenReports(t *testing.T) {
 	dir := t.TempDir()

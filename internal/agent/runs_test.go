@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/timhartmann7/burro/internal/agent"
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/report"
 	"github.com/timhartmann7/burro/internal/runner"
 	"github.com/timhartmann7/burro/internal/testutil"
 )
@@ -28,6 +30,7 @@ const (
 	argTail   = "--tail"
 	argCtx    = "--context"
 	run1      = "r1"
+	stepUnit  = "unit"
 	fullTree  = "5530df9c0e1a2b3c4d5e6f708192a3b4c5d6e7f8"
 )
 
@@ -71,10 +74,10 @@ func (s *server) call(args ...string) []agent.Reply {
 }
 
 // ok runs a call that must print one reply without an error.
-func (s *server) ok(args ...string) agent.Reply {
+func (s *server) ok(args ...string) *agent.Reply {
 	s.t.Helper()
 	replies := s.call(args...)
-	last := replies[len(replies)-1]
+	last := &replies[len(replies)-1]
 	if last.Error != nil {
 		s.t.Fatalf("%q: %+v", args, last.Error)
 	}
@@ -169,6 +172,81 @@ func TestStartAndWait(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(s.secrets); len(entries) != 0 {
 		t.Fatalf("secrets folders kept: %v", entries)
+	}
+}
+
+func TestStartWithArgs(t *testing.T) {
+	s := newServer(t, testutil.BuildBurro(t), toml("30"))
+	// Arguments that look like flags or a second pipeline stay the step's.
+	args := []string{"--grep", "a b", "slow", "--"}
+	started := s.start("--only", stepUnit, pipeline, args[0], args[1], args[2], args[3])
+	if strings.Join(started.Steps, " ") != stepUnit || strings.Join(started.Args, "|") != strings.Join(args, "|") {
+		t.Fatalf("started %+v", started)
+	}
+	s.done(run1)
+	var status report.Status
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(s.dir, ".burro", "runs", run1, "status.json"))), &status); err != nil ||
+		strings.Join(status.Args, "|") != strings.Join(args, "|") {
+		t.Fatalf("status.json args %q, %v", status.Args, err)
+	}
+	if log := readFile(t, filepath.Join(s.dir, ".burro", "runs", run1, "unit.log")); log != "unit ok --grep a b slow --\n" {
+		t.Fatalf("unit.log %q", log)
+	}
+	// The client checks this too; an older or other client must not get
+	// past the server either.
+	f := s.fails(output.ExitUsage, actStart, argPath, appPath, "--tree", fullTree, pipeline, "x")
+	if !strings.Contains(f.Message, "go to one step") || len(s.runs()) != 1 {
+		t.Fatalf("args for three steps: %+v, runs %v", f, s.runs())
+	}
+}
+
+func TestStartNearTimeout(t *testing.T) {
+	s := newServer(t, testutil.BuildBurro(t), toml("30"))
+	proj := report.Open(s.dir)
+	// Earlier runs: unit took 50 of its 60 minutes in r2, 59 in a run with
+	// arguments after it, and failed in the newest.
+	for _, prev := range []struct {
+		state   string
+		seconds int
+		args    []string
+	}{
+		{output.StateOK, 3000, nil},
+		{output.StateOK, 2000, nil},
+		{output.StateOK, 3540, []string{"a.spec.ts"}},
+		{output.StateFail, 3599, nil},
+	} {
+		id, err := proj.NewRun()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		st := &report.Status{
+			Run: id, Pipeline: pipeline, State: output.StateDone, Exit: new(int), Started: now, Finished: &now, Args: prev.args,
+			Steps: []report.Step{{Name: stepUnit, State: prev.state, Seconds: prev.seconds}, {Name: "lint", State: output.StateOK, Seconds: 1}},
+		}
+		if err := proj.WriteStatus(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := s.start(pipeline)
+	s.done(started.Run)
+	if len(started.Near) != 0 {
+		t.Fatalf("2000 of 3600 seconds is no risk: %+v", started.Near)
+	}
+	// r5 passed unit fast; take its place with a slow pass.
+	st, err := proj.Status(started.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Steps[0].Seconds = 2880
+	if err := proj.WriteStatus(st); err != nil {
+		t.Fatal(err)
+	}
+	started = s.start(pipeline)
+	s.done(started.Run)
+	want := []output.NearTimeout{{Step: stepUnit, Run: "r5", Seconds: 2880, Timeout: 3600}}
+	if !slices.Equal(started.Near, want) {
+		t.Fatalf("near %+v, want %+v", started.Near, want)
 	}
 }
 
@@ -272,4 +350,13 @@ func TestRunnerThatCannotStart(t *testing.T) {
 		t.Fatalf("next %+v", next)
 	}
 	s.done("r2")
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

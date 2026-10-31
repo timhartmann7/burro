@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -658,5 +660,150 @@ func TestRunNoDefaultPipeline(t *testing.T) {
 	w.must(v1, argWait)
 	if r := w.burro(v1, cmdLog, argStep, "nope"); r.Code != 4 || !strings.Contains(r.Stderr, "fix: use one of: test\n") {
 		t.Fatalf("unknown step: %d %q", r.Code, r.Stderr)
+	}
+}
+
+// failTOML is a step that fails without a report, so its summary is the
+// tail of its log.
+const failTOML = `
+[pipelines]
+default = ["e2e"]
+
+[steps.e2e]
+run = "echo cohorts are listed; exit 1"
+`
+
+func TestReadsSurviveDroppedSSH(t *testing.T) {
+	w := ready(t, failTOML, nil)
+	w.must(v1, argRun)
+	if r := w.burro(v1, argWait); r.Code != 1 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	log := runsDir + "/r1/e2e.log"
+	for _, tt := range []struct {
+		args []string
+		code int
+	}{
+		{args: []string{argFails, "r1"}, code: 1},
+		{args: []string{cmdLog, "r1", argStep, argE2E, argGrep, "cohorts"}, code: 0},
+		{args: []string{argStatus, "r1"}, code: 1},
+	} {
+		// Opening a FIFO blocks until someone writes it, so the call is
+		// still on the server when the connection drops.
+		blocked := log
+		if tt.args[0] == argStatus {
+			blocked = runsDir + "/r1/status.json"
+		}
+		saved := w.srv.Exec(t, "cat", blocked)
+		w.srv.Exec(t, "sh", "-c", `rm "$1" && mkfifo "$1"`, "sh", blocked)
+		done := make(chan testutil.Result, 1)
+		go func() { done <- w.burro(v1, tt.args...) }()
+		testutil.Poll(t, 30*time.Second, func() error {
+			if len(w.serverPids("agent "+tt.args[0])) == 0 {
+				return errors.New("no executor call on the server yet")
+			}
+			return nil
+		})
+		w.dropSSH()
+		w.srv.Exec(t, "sh", "-c", `rm "$1" && printf '%s\n' "$2" >"$1"`, "sh", blocked, saved)
+		r := <-done
+		if r.Code != tt.code || r.Stderr != "" || !strings.Contains(r.Stdout, "cohorts are listed") && tt.args[0] != argStatus {
+			t.Fatalf("%q after a dropped connection: exit %d\nstdout %q\nstderr %q", tt.args, r.Code, r.Stdout, r.Stderr)
+		}
+	}
+}
+
+// samePulled checks that each file, a path in the project, arrived in
+// local byte for byte.
+func (w *world) samePulled(local string, files ...string) {
+	w.t.Helper()
+	for _, name := range files {
+		data, err := os.ReadFile(filepath.Join(local, filepath.FromSlash(name)))
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		sum := sha256.Sum256(data)
+		if want := strings.Fields(w.srv.Exec(w.t, "sha256sum", appDir+"/"+name))[0]; hex.EncodeToString(sum[:]) != want {
+			w.t.Fatalf("%s arrived changed", name)
+		}
+	}
+}
+
+func TestPull(t *testing.T) {
+	w := ready(t, `
+[pipelines]
+default = ["e2e"]
+
+[steps.e2e]
+run = "mkdir -p test-results/login && head -c 70000 /dev/urandom >test-results/login/trace.zip && printf '\\211PNG\\r\\n' >test-results/login/failed-1.png && ln -s /etc/passwd test-results/login/leak; exit 1"
+`, map[string]string{gitignore: "test-results/\n.burro/\n"})
+	w.must(v1, argRun)
+	if r := w.burro(v1, argWait); r.Code != 1 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	local := filepath.Join(w.repo, ".burro", "pull")
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "old.txt"), []byte("from an older pull"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := w.burro(v1, "pull", "test-results")
+	if r.Code != 0 || r.Stderr != "" || r.Stdout != "pulled 2 files, 0.1 MB, into .burro/pull\n"+
+		".burro/pull/test-results/login/failed-1.png\n.burro/pull/test-results/login/trace.zip\n" {
+		t.Fatalf("pull: exit %d\nstdout %q\nstderr %q", r.Code, r.Stdout, r.Stderr)
+	}
+	w.samePulled(local, "test-results/login/trace.zip", "test-results/login/failed-1.png")
+	if _, err := os.Lstat(filepath.Join(local, "test-results", "login", "leak")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a link came along: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(local, "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an older pull stayed: %v", err)
+	}
+	// What a pull brings stays out of the tree hash and the next sync, even
+	// in a project whose .gitignore lacks .burro/.
+	if err := os.WriteFile(filepath.Join(w.repo, gitignore), []byte("test-results/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.must(v1, "pull", "test-results/*/*.png")
+	if st := testutil.Git(t, w.repo, "status", "--porcelain", "--untracked-files=all"); strings.Contains(st, ".burro/") {
+		t.Fatalf("git sees the pull:\n%s", st)
+	}
+	if r := w.burro(v1, "pull", "nope"); r.Code != 4 || !strings.Contains(r.Stderr, `matches "nope"`) {
+		t.Fatalf("no match: exit %d %q", r.Code, r.Stderr)
+	}
+}
+
+func TestRunArgs(t *testing.T) {
+	w := ready(t, `
+[pipelines]
+default = ["install", "e2e"]
+
+[steps.install]
+run = "true"
+
+[steps.e2e]
+run = "printf '[%s]' e2e"
+`, nil)
+	args := []string{"tests/a b.spec.ts", "$(touch pwned)", "it's", "--grep=x", "--"}
+	r := w.burro(v1, append([]string{argRun, argOnly, argE2E, "--"}, args...)...)
+	if r.Code != 0 || !strings.Contains(r.Stdout, "\nargs: tests/a b.spec.ts $(touch pwned) it's --grep=x --\n") {
+		t.Fatalf("run: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	if r := w.burro(v1, argWait); r.Code != 0 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	if log := w.serverFile(runsDir + "/r1/e2e.log"); log != "[e2e][tests/a b.spec.ts][$(touch pwned)][it's][--grep=x][--]" {
+		t.Fatalf("e2e.log %q", log)
+	}
+	if w.srv.Exec(t, "sh", "-c", "ls "+appDir+"/pwned 2>/dev/null; true") != "" {
+		t.Fatal("an argument ran as a command on the server")
+	}
+	// Arguments for a pipeline of two steps fail before anything reaches
+	// the server.
+	r = w.burro(v1, argRun, "--", "x")
+	if r.Code != 4 || r.Stderr != "burro: arguments after -- go to one step, and pipeline default runs 2: install, e2e\n"+
+		"fix: pick the step with --only, for example burro run default --only install -- x\n" || len(w.runFolders()) != 1 {
+		t.Fatalf("two steps: exit %d %q, runs %v", r.Code, r.Stderr, w.runFolders())
 	}
 }

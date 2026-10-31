@@ -137,7 +137,9 @@ func more(run string, f *output.Failure) string {
 }
 
 // previous returns the failure keys of the last finished run before s of
-// the same pipeline.
+// the same pipeline. A run with step arguments ran only some tests, and a
+// canceled one stopped part way, so a failure they lack may still be an old
+// one; neither is a baseline.
 func (p *Project) previous(s *Status) map[string]bool {
 	keys := map[string]bool{}
 	m := runName.FindStringSubmatch(s.Run)
@@ -147,7 +149,7 @@ func (p *Project) previous(s *Status) map[string]bool {
 	n, _ := strconv.Atoi(m[1])
 	for n--; n > 0; n-- {
 		prev, err := p.Status("r" + strconv.Itoa(n))
-		if err != nil || prev.Pipeline != s.Pipeline || prev.State == output.StateRunning {
+		if err != nil || prev.Pipeline != s.Pipeline || prev.State != output.StateDone || len(prev.Args) > 0 {
 			continue
 		}
 		for _, st := range prev.Steps {
@@ -161,6 +163,32 @@ func (p *Project) previous(s *Status) map[string]bool {
 		return keys
 	}
 	return keys
+}
+
+// lookBack bounds how many earlier runs LastPassed reads.
+const lookBack = 50
+
+// LastPassed finds the newest of the runs before id in which step passed,
+// leaving out runs with step arguments, which ran only part of it. It
+// returns that run and how long the step took there.
+func (p *Project) LastPassed(id, step string) (run string, seconds int, found bool) {
+	m := runName.FindStringSubmatch(id)
+	if m == nil {
+		return "", 0, false
+	}
+	n, _ := strconv.Atoi(m[1])
+	for prev := n - 1; prev > 0 && prev >= n-lookBack; prev-- {
+		s, err := p.Status("r" + strconv.Itoa(prev))
+		if err != nil || len(s.Args) > 0 {
+			continue
+		}
+		for _, st := range s.Steps {
+			if st.Name == step && st.State == output.StateOK {
+				return s.Run, st.Seconds, true
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // reports parses the report copies of one step. rep is nil when there is

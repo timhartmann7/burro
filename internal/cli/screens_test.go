@@ -199,7 +199,7 @@ func TestHelpConfigExampleWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the minimal config in help config fails: %v", err)
 	}
-	if _, err := proj.cfg.Select("default", "", nil); err != nil {
+	if _, err := proj.cfg.Select("default", "", nil, nil); err != nil {
 		t.Fatalf("its default pipeline: %v", err)
 	}
 }
@@ -249,10 +249,11 @@ func commandTable() []string {
 		"burro doctor [host]",
 		"burro exec [--max-lines 60] [--] cmd args…` or `burro exec --file path [args…]",
 		"burro sync",
-		"burro run [pipeline] [--from step] [--only a,b]",
-		"burro wait [id] [--timeout 60m]",
+		"burro run [pipeline] [--from step] [--only a,b] [-- args…]",
+		"burro wait [id] [--timeout d]",
 		"burro status [id]",
 		"burro log [id] --step s [--grep re] [--tail 60] [--context 5]",
+		"burro pull <pattern>…",
 		"burro cancel [id]",
 		"burro failures [id] [--max-lines 40]",
 		"burro clean [id]",
@@ -294,7 +295,7 @@ func TestRegistryMatchesCommandTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var docRows []string
-	for _, m := range regexp.MustCompile("(?m)^\\| `(burro .*?)` \\| .* \\| S\\d \\|$").FindAllStringSubmatch(string(doc), -1) {
+	for _, m := range regexp.MustCompile("(?m)^\\| `(burro .*?)` \\| .* \\| (?:S\\d|post-MVP) \\|$").FindAllStringSubmatch(string(doc), -1) {
 		docRows = append(docRows, m[1])
 	}
 	if strings.Join(docRows, "\n") != strings.Join(want, "\n") {
