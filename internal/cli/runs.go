@@ -164,10 +164,16 @@ func (a *App) wait(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	timeout, err := time.ParseDuration(p.flags["timeout"])
-	if err != nil || timeout <= 0 {
-		return output.NewError(output.ExitUsage, fmt.Sprintf("wait: --timeout %q is not a positive duration", p.flags["timeout"]),
-			"pass a duration, for example --timeout 30m")
+	// Without --timeout, wait lasts as long as the run: the step timeouts
+	// and the heartbeat already end every run.
+	var deadline time.Time
+	if value, ok := p.flags["timeout"]; ok {
+		timeout, err := time.ParseDuration(value)
+		if err != nil || timeout <= 0 {
+			return output.NewError(output.ExitUsage, fmt.Sprintf("wait: --timeout %q is not a positive duration", value),
+				"pass a duration, for example --timeout 30m")
+		}
+		deadline = time.Now().Add(timeout)
 	}
 	proj, err := a.project(ctx)
 	if err != nil {
@@ -182,7 +188,7 @@ func (a *App) wait(ctx context.Context, p *parsed) error {
 		ctx, stop = signal.NotifyContext(ctx, os.Interrupt)
 		defer stop()
 	}
-	sum, err := w.loop(ctx, time.Now().Add(timeout))
+	sum, err := w.loop(ctx, deadline)
 	w.line.clear()
 	if errors.Is(err, errInterrupted) {
 		// stderr is the terminal of the person who pressed Ctrl+C; when it
@@ -218,15 +224,18 @@ type waiter struct {
 
 // loop returns the summary of the finished run. A canceled ctx, which is
 // Ctrl+C in human mode, or the deadline end it early; the run goes on
-// either way.
+// either way. A zero deadline never comes.
 func (w *waiter) loop(ctx context.Context, deadline time.Time) (*output.Summary, error) {
 	for {
-		left := time.Until(deadline).Round(time.Second)
+		left := waitCall
+		if !deadline.IsZero() {
+			left = min(left, time.Until(deadline).Round(time.Second))
+		}
 		if left <= 0 {
 			return nil, output.NewError(output.ExitRunning, fmt.Sprintf("%s is still running", w.shown()),
 				fmt.Sprintf("run burro wait %s again; the run keeps going", w.id))
 		}
-		sum, err := w.next(ctx, min(left, waitCall))
+		sum, err := w.next(ctx, left)
 		if ctx.Err() != nil {
 			return nil, errInterrupted
 		}

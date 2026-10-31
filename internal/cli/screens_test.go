@@ -250,7 +250,7 @@ func commandTable() []string {
 		"burro exec [--max-lines 60] [--] cmd args…` or `burro exec --file path [args…]",
 		"burro sync",
 		"burro run [pipeline] [--from step] [--only a,b]",
-		"burro wait [id] [--timeout 60m]",
+		"burro wait [id] [--timeout d]",
 		"burro status [id]",
 		"burro log [id] --step s [--grep re] [--tail 60] [--context 5]",
 		"burro cancel [id]",

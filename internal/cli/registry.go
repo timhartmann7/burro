@@ -278,9 +278,9 @@ func (a *App) registry() []command {
 			summary: "wait for the run, then print a short summary",
 			group:   groupRun,
 			about:   "wait for a run to end, then print its summary",
-			usage:   []string{"wait [id] [--timeout 60m]"},
+			usage:   []string{"wait [id] [--timeout d]"},
 			flags: []flagSpec{
-				{name: "timeout", arg: "d", def: "60m", usage: "stop waiting after this long, the run goes on"},
+				{name: "timeout", arg: "d", usage: "stop waiting after this long, the run goes on; none by default"},
 			},
 			maxArgs: 1,
 			example: "burro wait r42 --timeout 30m",
