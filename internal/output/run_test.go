@@ -17,6 +17,7 @@ const (
 	pipelineDefault = "default"
 	grepCohorts     = "cohorts"
 	stepE2E         = "e2e"
+	stepUnit        = "unit"
 	stepTest        = "test"
 	stepLighthouse  = "lighthouse"
 	pipelineVerify  = "verify"
@@ -42,12 +43,21 @@ func runResults() map[string]func(p *output.Printer) error {
 				Near: []output.NearTimeout{{Step: stepE2E, Run: "r13", Seconds: 54 * 60, Timeout: 60 * 60}},
 			}, 900*time.Millisecond)
 		},
+		"summary-skipped": func(p *output.Printer) error {
+			return p.Summary(&output.Summary{
+				Run: "r16", Pipeline: pipelineVerify, Tree: shortTree, State: output.StateDone, Exit: exit(1), Seconds: 44 * 60,
+				Steps: []output.SummaryStep{
+					{Name: stepUnit, State: output.StateOK, Seconds: 190, Tests: &output.Tests{Total: 2081, Passed: 2081}},
+					{Name: stepE2E, State: output.StateFail, Seconds: 2640, Tests: &output.Tests{Total: 2267, Passed: 2256, Failed: 6, Skipped: 5}},
+				},
+			}, 0)
+		},
 		"summary-failed": func(p *output.Printer) error {
 			return p.Summary(&output.Summary{
 				Run: run42, Pipeline: pipelineVerify, Tree: shortTree, State: output.StateDone, Exit: exit(1), Seconds: 41 * 60,
 				Steps: []output.SummaryStep{
 					{Name: stepInstall, State: output.StateSkip, Detail: "pnpm-lock.yaml unchanged"},
-					{Name: "unit", State: output.StateOK, Seconds: 190},
+					{Name: stepUnit, State: output.StateOK, Seconds: 190},
 					{Name: stepE2E, State: output.StateFail, Seconds: 1320, Tail: []string{"  1 failed", "    tests/site.spec.ts:252 cohorts are listed"}, More: "burro log r42 --step e2e"},
 					{Name: stepLighthouse, State: output.StateNotRun},
 				},
@@ -116,7 +126,7 @@ func junitSummary() *output.Summary {
 		Run: run42, Pipeline: pipelineVerify, Tree: shortTree, State: output.StateDone, Exit: exit(1), Seconds: 41 * 60,
 		Steps: []output.SummaryStep{
 			{Name: stepInstall, State: output.StateSkip, Detail: "pnpm-lock.yaml unchanged"},
-			{Name: "unit", State: output.StateOK, Seconds: 190, Tests: &output.Tests{Total: 2081, Passed: 2081}},
+			{Name: stepUnit, State: output.StateOK, Seconds: 190, Tests: &output.Tests{Total: 2081, Passed: 2081}},
 			{Name: stepE2E, State: output.StateFail, Seconds: 1320, Tests: &output.Tests{Total: 155, Passed: 152, Failed: 3}},
 			{Name: "api", State: output.StateFail, Seconds: 30, Unreadable: true, Tail: []string{"Segmentation fault"}, More: "burro log r42 --step api"},
 			{Name: stepLighthouse, State: output.StateOK, Seconds: 14 * 60},
@@ -167,7 +177,9 @@ func TestSummaryFitsMaxLines(t *testing.T) {
 			t.Fatal(err)
 		}
 		var got output.Summary
-		if err := json.Unmarshal([]byte(j.String()), &got); err != nil || len(got.Failures) != shown || got.Hidden != 300-shown {
+		// Lines measure text; JSON keeps every failure for the tools that
+		// read it.
+		if err := json.Unmarshal([]byte(j.String()), &got); err != nil || len(got.Failures) != 300 || got.Hidden != 0 {
 			t.Fatalf("max %d json: %d failures, %d hidden, %v", maxLines, len(got.Failures), got.Hidden, err)
 		}
 	}

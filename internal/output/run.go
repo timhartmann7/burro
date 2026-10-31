@@ -153,11 +153,13 @@ const moreFactor = 10
 // one line per step and under each failed step its failures or log tail.
 // With maxLines above 0 everything fits in that many lines; the last line
 // then says how many failures stayed out and which command shows them.
+// Lines are a measure of text, so JSON carries every failure the server
+// sent.
 func (p *Printer) Summary(s *Summary, maxLines int) error {
-	s = s.fit(maxLines)
 	if p.json {
-		return p.writeJSON(s)
+		return p.writeJSON(s.fit(0))
 	}
+	s = s.fit(maxLines)
 	var b strings.Builder
 	b.WriteString(s.Headline() + "\n")
 	if s.Local != "" {
@@ -207,6 +209,10 @@ func (p *Printer) stepLine(st *SummaryStep, nameWidth, stateWidth int) string {
 	cols := []string{fmt.Sprintf("%-*s", nameWidth, st.Name), state}
 	if st.Tests != nil {
 		cols = append(cols, fmt.Sprintf("%d/%d", st.Tests.Passed, st.Tests.Total))
+		// Passed of total alone reads skipped tests as failed ones.
+		if st.Tests.Skipped > 0 {
+			cols = append(cols, fmt.Sprintf("%d skipped", st.Tests.Skipped))
+		}
 	}
 	if st.State == StateOK || st.State == StateFail || st.State == StateRunning {
 		cols = append(cols, Duration(time.Duration(st.Seconds)*time.Second))

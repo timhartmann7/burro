@@ -31,3 +31,4 @@ Exit codes  0 passed · 1 tests failed · 2 server problem · 3 still running
 
 burro <command> --help   details and an example
 burro help config        burro.toml fields and test reporters
+--json on any command    one JSON object instead of text
