@@ -56,7 +56,10 @@ type command struct {
 	maxArgs int
 	// raw hands everything from the first argument on to the command
 	// untouched, flags included.
-	raw     bool
+	raw bool
+	// pass keeps the arguments after -- apart from the positional ones,
+	// for the command to hand on.
+	pass    bool
 	example string
 	exits   []exitLabel
 	run     func(ctx context.Context, p *parsed) error
@@ -64,10 +67,12 @@ type command struct {
 
 // parsed is one command line after parsing.
 type parsed struct {
-	args  []string
-	flags map[string]string
-	help  bool
-	print *output.Printer
+	args []string
+	// passed are the arguments after -- of a pass command.
+	passed []string
+	flags  map[string]string
+	help   bool
+	print  *output.Printer
 	// human is set in human mode, where stderr may carry progress.
 	human bool
 }
@@ -110,6 +115,9 @@ func (c *command) scan(p *parsed, args []string) error {
 		switch {
 		case c.raw && len(p.args) > 0:
 			p.args = append(p.args, args[i:]...)
+			return nil
+		case a == "--" && c.pass:
+			p.passed = slices.Clone(args[i+1:])
 			return nil
 		case a == "--":
 			p.args = append(p.args, args[i+1:]...)
@@ -258,13 +266,14 @@ func (a *App) registry() []command {
 			summary: "sync the code and start a run, returns at once",
 			group:   groupRun,
 			about:   "sync the code and start a pipeline on the server, returns at once",
-			usage:   []string{"run [pipeline] [--from step] [--only a,b]"},
+			usage:   []string{"run [pipeline] [--from step] [--only a,b] [-- args…]"},
 			flags: []flagSpec{
 				{name: "from", arg: "step", usage: "start at this step, the ones before it don't run"},
 				{name: "only", arg: "a,b", usage: "run only these steps, in pipeline order"},
 			},
 			maxArgs: 1,
-			example: "burro run verify --from e2e",
+			pass:    true,
+			example: "burro run verify --only e2e -- tests/login.spec.ts",
 			exits: []exitLabel{
 				{output.ExitPassed, "started"},
 				{output.ExitServer, serverProblem},

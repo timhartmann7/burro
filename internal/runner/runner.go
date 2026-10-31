@@ -272,9 +272,10 @@ func (x *execution) cacheFile(step string) string {
 
 // cache hashes the skip_if_unchanged files and tells whether they match the
 // last successful run. Without such files, or when one can't be read, the
-// hashes are nil and the step runs.
+// hashes are nil and the step runs. A step with arguments runs a part of
+// its work, so it neither skips nor stands for the next run's skip.
 func (x *execution) cache(step *config.Step) (map[string]string, bool) {
-	if len(step.SkipIfUnchanged) == 0 {
+	if len(step.SkipIfUnchanged) == 0 || len(x.status.Args) > 0 {
 		return nil, false
 	}
 	root, err := os.OpenRoot(x.req.dir)
@@ -324,8 +325,14 @@ func (x *execution) exec(ctx context.Context, step *config.Step) (code int, deta
 		return 0, "", err
 	}
 	defer func() { err = errors.Join(err, out.close()) }()
+	script := step.Run
+	if len(x.status.Args) > 0 {
+		// The arguments reach bash as $1 and on, so no quoting of theirs
+		// ever becomes shell code.
+		script = strings.TrimRight(script, " \t\r\n") + ` "$@"`
+	}
 	// The step stops through its process group, not through the context.
-	cmd := shell(context.WithoutCancel(ctx), x.req.dir, step.Run, nil)
+	cmd := shell(context.WithoutCancel(ctx), x.req.dir, script, x.status.Args)
 	cmd.Env = append(append(append([]string{}, x.r.env...), x.vars(step.Name)...), x.stepEnv(step)...)
 	cmd.Stdout, cmd.Stderr = out.w, out.w
 	// Its own session makes the step the leader of a new process group, so

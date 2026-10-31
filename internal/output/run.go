@@ -39,6 +39,7 @@ type Started struct {
 	Pipeline string   `json:"pipeline"`
 	Tree     string   `json:"tree"`
 	Steps    []string `json:"steps"`
+	Args     []string `json:"args,omitempty"`
 	Synced   int      `json:"synced"`
 	Seconds  float64  `json:"seconds"`
 }
@@ -53,8 +54,12 @@ func (p *Printer) Started(s *Started, took time.Duration) error {
 	if s.Synced == 1 {
 		files = "file"
 	}
-	return p.write(fmt.Sprintf("%s %s · tree %s · %s\nsynced %d %s in %s\nsteps: %s\n",
-		s.Run, s.Pipeline, s.Tree, StateRunning, s.Synced, files, Duration(took), strings.Join(s.Steps, " ")))
+	text := fmt.Sprintf("%s %s · tree %s · %s\nsynced %d %s in %s\nsteps: %s\n",
+		s.Run, s.Pipeline, s.Tree, StateRunning, s.Synced, files, Duration(took), strings.Join(s.Steps, " "))
+	if len(s.Args) > 0 {
+		text += "args: " + strings.Join(s.Args, " ") + "\n"
+	}
+	return p.write(text)
 }
 
 // Summary is the state of one run: what status, wait and cancel print.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/timhartmann7/burro/internal/agent"
 	"github.com/timhartmann7/burro/internal/output"
+	"github.com/timhartmann7/burro/internal/report"
 	"github.com/timhartmann7/burro/internal/runner"
 	"github.com/timhartmann7/burro/internal/testutil"
 )
@@ -28,6 +29,7 @@ const (
 	argTail   = "--tail"
 	argCtx    = "--context"
 	run1      = "r1"
+	stepUnit  = "unit"
 	fullTree  = "5530df9c0e1a2b3c4d5e6f708192a3b4c5d6e7f8"
 )
 
@@ -172,6 +174,31 @@ func TestStartAndWait(t *testing.T) {
 	}
 }
 
+func TestStartWithArgs(t *testing.T) {
+	s := newServer(t, testutil.BuildBurro(t), toml("30"))
+	// Arguments that look like flags or a second pipeline stay the step's.
+	args := []string{"--grep", "a b", "slow", "--"}
+	started := s.start("--only", stepUnit, pipeline, args[0], args[1], args[2], args[3])
+	if strings.Join(started.Steps, " ") != stepUnit || strings.Join(started.Args, "|") != strings.Join(args, "|") {
+		t.Fatalf("started %+v", started)
+	}
+	s.done(run1)
+	var status report.Status
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(s.dir, ".burro", "runs", run1, "status.json"))), &status); err != nil ||
+		strings.Join(status.Args, "|") != strings.Join(args, "|") {
+		t.Fatalf("status.json args %q, %v", status.Args, err)
+	}
+	if log := readFile(t, filepath.Join(s.dir, ".burro", "runs", run1, "unit.log")); log != "unit ok --grep a b slow --\n" {
+		t.Fatalf("unit.log %q", log)
+	}
+	// The client checks this too; an older or other client must not get
+	// past the server either.
+	f := s.fails(output.ExitUsage, actStart, argPath, appPath, "--tree", fullTree, pipeline, "x")
+	if !strings.Contains(f.Message, "go to one step") || len(s.runs()) != 1 {
+		t.Fatalf("args for three steps: %+v, runs %v", f, s.runs())
+	}
+}
+
 func TestBusyAndCancel(t *testing.T) {
 	s := newServer(t, testutil.BuildBurro(t), toml("300"))
 	started := s.start("slow")
@@ -272,4 +299,13 @@ func TestRunnerThatCannotStart(t *testing.T) {
 		t.Fatalf("next %+v", next)
 	}
 	s.done("r2")
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

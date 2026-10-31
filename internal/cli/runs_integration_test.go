@@ -710,3 +710,37 @@ func TestReadsSurviveDroppedSSH(t *testing.T) {
 		}
 	}
 }
+
+func TestRunArgs(t *testing.T) {
+	w := ready(t, `
+[pipelines]
+default = ["install", "e2e"]
+
+[steps.install]
+run = "true"
+
+[steps.e2e]
+run = "printf '[%s]' e2e"
+`, nil)
+	args := []string{"tests/a b.spec.ts", "$(touch pwned)", "it's", "--grep=x", "--"}
+	r := w.burro(v1, append([]string{argRun, argOnly, argE2E, "--"}, args...)...)
+	if r.Code != 0 || !strings.Contains(r.Stdout, "\nargs: tests/a b.spec.ts $(touch pwned) it's --grep=x --\n") {
+		t.Fatalf("run: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	if r := w.burro(v1, argWait); r.Code != 0 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	if log := w.serverFile(runsDir + "/r1/e2e.log"); log != "[e2e][tests/a b.spec.ts][$(touch pwned)][it's][--grep=x][--]" {
+		t.Fatalf("e2e.log %q", log)
+	}
+	if w.srv.Exec(t, "sh", "-c", "ls "+appDir+"/pwned 2>/dev/null; true") != "" {
+		t.Fatal("an argument ran as a command on the server")
+	}
+	// Arguments for a pipeline of two steps fail before anything reaches
+	// the server.
+	r = w.burro(v1, argRun, "--", "x")
+	if r.Code != 4 || r.Stderr != "burro: arguments after -- go to one step, and pipeline default runs 2: install, e2e\n"+
+		"fix: pick the step with --only, for example burro run default --only install -- x\n" || len(w.runFolders()) != 1 {
+		t.Fatalf("two steps: exit %d %q, runs %v", r.Code, r.Stderr, w.runFolders())
+	}
+}

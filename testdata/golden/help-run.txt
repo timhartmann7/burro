@@ -1,12 +1,12 @@
 burro run · sync the code and start a pipeline on the server, returns at once
 
-Usage: burro run [pipeline] [--from step] [--only a,b]
+Usage: burro run [pipeline] [--from step] [--only a,b] [-- args…]
 
   --from step    start at this step, the ones before it don't run
   --only a,b     run only these steps, in pipeline order
 
 Example
-  burro run verify --from e2e
+  burro run verify --only e2e -- tests/login.spec.ts
 
 Exit codes  0 started · 2 server problem · 4 bad burro.toml or step
             5 another run is active

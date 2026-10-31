@@ -99,6 +99,8 @@ Keep your agent rules somewhere else? `burro init --print` prints the block and 
   Act on its summary.
 - If you can't run background commands, run
   `burro wait <id> --timeout 9m` and repeat it while it exits with 3.
+- To rerun a few tests, pass them to their step:
+  `burro run <pipeline> --only <step> -- <test files>`.
 - Never poll with sleep loops.
 - Need more detail: `burro log --step <name> --grep <pattern>`.
   Never print a whole log.

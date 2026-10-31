@@ -61,7 +61,7 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if err != nil {
 		return err
 	}
-	selected, err := proj.cfg.Select(pipeline, from, onlyList)
+	selected, err := proj.cfg.Select(pipeline, from, onlyList, p.passed)
 	if err != nil {
 		return err
 	}
@@ -90,9 +90,12 @@ func (a *App) run(ctx context.Context, p *parsed) error {
 	if hasOnly {
 		args = append(args, "--only", only)
 	}
+	// The step's arguments come after the pipeline, where the executor's
+	// flags end.
+	args = append(append(args, pipeline), p.passed...)
 	startCtx, cancel := context.WithTimeout(ctx, shortTimeout)
 	defer cancel()
-	reply, err := a.call(startCtx, proj.host, stdin, append(args, pipeline)...)
+	reply, err := a.call(startCtx, proj.host, stdin, args...)
 	if err != nil {
 		return err
 	}

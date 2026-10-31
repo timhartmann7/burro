@@ -554,8 +554,9 @@ func (c *Config) Drop() []*regexp.Regexp {
 
 // Select returns the steps of pipeline in order. A step before from, or one
 // that only doesn't name, stays out of the run. Empty from and nil only
-// select every step.
-func (c *Config) Select(pipeline, from string, only []string) ([]Selected, error) {
+// select every step. args go to the end of one step's command, so with args
+// exactly one step may run.
+func (c *Config) Select(pipeline, from string, only, args []string) ([]Selected, error) {
 	names, ok := c.pipelines[pipeline]
 	if !ok {
 		return nil, output.NewError(output.ExitUsage, fmt.Sprintf("%s has no pipeline %q", File, pipeline),
@@ -572,6 +573,7 @@ func (c *Config) Select(pipeline, from string, only []string) ([]Selected, error
 		}
 	}
 	selected := make([]Selected, 0, len(names))
+	var running []string
 	started := from == ""
 	for _, name := range names {
 		started = started || name == from
@@ -581,8 +583,19 @@ func (c *Config) Select(pipeline, from string, only []string) ([]Selected, error
 			sel.Skip = "--from " + from
 		case only != nil && !slices.Contains(only, name):
 			sel.Skip = "--only " + strings.Join(only, ",")
+		default:
+			running = append(running, name)
 		}
 		selected = append(selected, sel)
+	}
+	if len(args) > 0 && len(running) != 1 {
+		step := "<step>"
+		if len(running) > 0 {
+			step = running[0]
+		}
+		return nil, output.NewError(output.ExitUsage,
+			fmt.Sprintf("arguments after -- go to one step, and pipeline %s runs %d: %s", pipeline, len(running), strings.Join(running, ", ")),
+			fmt.Sprintf("pick the step with --only, for example burro run %s --only %s -- %s", pipeline, step, strings.Join(args, " ")))
 	}
 	return selected, nil
 }

@@ -340,7 +340,7 @@ func TestSelect(t *testing.T) {
 		{name: "default", pipeline: config.DefaultPipeline, only: []string{unit, unit}, want: "install(--only unit,unit) unit"},
 	}
 	for _, tt := range tests {
-		sel, err := c.Select(tt.pipeline, tt.from, tt.only)
+		sel, err := c.Select(tt.pipeline, tt.from, tt.only, nil)
 		if err != nil || describe(sel) != tt.want {
 			t.Errorf("%s: got %q, %v; want %q", tt.name, describe(sel), err, tt.want)
 		}
@@ -364,9 +364,39 @@ func TestSelectRejects(t *testing.T) {
 		{pipeline: verify, only: []string{""}, names: install},
 		{pipeline: verify, from: "unused", names: install},
 	} {
-		_, err := c.Select(bad.pipeline, bad.from, bad.only)
+		_, err := c.Select(bad.pipeline, bad.from, bad.only, nil)
 		if _, fix := usageError(t, err); !strings.Contains(fix, bad.names) {
 			t.Errorf("Select(%q, %q, %q): fix %q", bad.pipeline, bad.from, bad.only, fix)
+		}
+	}
+}
+
+func TestSelectArgs(t *testing.T) {
+	c, err := config.Parse([]byte(full), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"tests/login.spec.ts"}
+	sel, err := c.Select(verify, "", []string{e2e}, args)
+	if err != nil || describe(sel) != "install(--only e2e) unit(--only e2e) e2e lighthouse(--only e2e)" {
+		t.Fatalf("one step with arguments: %q, %v", describe(sel), err)
+	}
+	if sel, err = c.Select(verify, "lighthouse", nil, args); err != nil || len(sel) != 4 {
+		t.Fatalf("--from the last step: %q, %v", describe(sel), err)
+	}
+	for _, bad := range []struct {
+		from string
+		only []string
+		msg  string
+	}{
+		{msg: "arguments after -- go to one step, and pipeline verify runs 4: install, unit, e2e, lighthouse"},
+		{only: []string{unit, e2e}, msg: "arguments after -- go to one step, and pipeline verify runs 2: unit, e2e"},
+		{from: e2e, msg: "arguments after -- go to one step, and pipeline verify runs 2: e2e, lighthouse"},
+	} {
+		_, err := c.Select(verify, bad.from, bad.only, args)
+		msg, fix := usageError(t, err)
+		if msg != bad.msg || !strings.Contains(fix, "--only") || !strings.HasSuffix(fix, "-- tests/login.spec.ts") {
+			t.Errorf("from %q only %q: %q / %q", bad.from, bad.only, msg, fix)
 		}
 	}
 }
@@ -406,7 +436,7 @@ func FuzzRunConfig(f *testing.F) {
 // without exit 4 or on a step that validation should have refused.
 func checkSelection(t *testing.T, c *config.Config, pipeline, from string) {
 	t.Helper()
-	sel, err := c.Select(pipeline, from, nil)
+	sel, err := c.Select(pipeline, from, nil, nil)
 	if err != nil {
 		usageError(t, err)
 		return
@@ -507,7 +537,7 @@ func TestSecretsRead(t *testing.T) {
 		"[steps.a]\nrun = \"x\"\nsecrets = [\"npmrc\", \"key\"]\n[steps.b]\nrun = \"x\"\nsecrets = [\"npmrc\", \"abs\"]\n"+
 		"[steps.c]\nrun = \"x\"\nsecrets = [\"gone\"]\n"+
 		"[secrets]\nnpmrc = \"~/.npmrc\"\nkey = \"keys/a\"\nabs = \""+abs+"\"\ngone = \"~/missing\"\n")
-	sel, err := c.Select(config.DefaultPipeline, "", []string{"a", "b"})
+	sel, err := c.Select(config.DefaultPipeline, "", []string{"a", "b"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +546,7 @@ func TestSecretsRead(t *testing.T) {
 		t.Fatalf("secrets %q, %v", got, err)
 	}
 	// A step that runs needs its secret; one that doesn't run needs nothing.
-	sel, err = c.Select(config.DefaultPipeline, "c", nil)
+	sel, err = c.Select(config.DefaultPipeline, "c", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +560,7 @@ func TestSecretsRead(t *testing.T) {
 	if err := os.Chmod(abs, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	sel, _ = c.Select(config.DefaultPipeline, "b", []string{"b"})
+	sel, _ = c.Select(config.DefaultPipeline, "b", []string{"b"}, nil)
 	if _, err := c.Secrets(sel, root, home); err == nil {
 		t.Fatal("unreadable secret passed")
 	} else {

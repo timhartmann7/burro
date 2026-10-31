@@ -107,6 +107,8 @@ func TestParse(t *testing.T) {
 		cmd   string
 		pos   []string
 		flags map[string]string
+		// passed are the arguments after -- of run.
+		passed []string
 	}{
 		{args: []string{argHost, argAdd, "a", someTarget, "-i", "k", "--force"}, cmd: "host add", pos: []string{"a", someTarget}, flags: map[string]string{"i": "k", "force": flagSet}},
 		{args: []string{argHost, argAdd, "-i=k", "a", argJSON, someTarget}, cmd: "host add", pos: []string{"a", someTarget}, flags: map[string]string{"i": "k", flagJSON: flagSet}},
@@ -119,6 +121,8 @@ func TestParse(t *testing.T) {
 		{args: []string{argSync, "--mode=agent"}, cmd: argSync, flags: map[string]string{"mode": agentMode}},
 		{args: []string{argRun}, cmd: argRun, flags: map[string]string{}},
 		{args: []string{argRun, argVerify, argOnly, "a,b", "--from=e2e"}, cmd: argRun, pos: []string{argVerify}, flags: map[string]string{"only": "a,b", "from": argE2E}},
+		{args: []string{argRun, argVerify, argOnly, argE2E, "--", "a b.spec.ts", argJSON, "--", "-x"}, cmd: argRun, pos: []string{argVerify}, flags: map[string]string{"only": argE2E}, passed: []string{"a b.spec.ts", argJSON, "--", "-x"}},
+		{args: []string{argRun, "--", argE2E}, cmd: argRun, flags: map[string]string{}, passed: []string{argE2E}},
 		{args: []string{argWait, "r3"}, cmd: argWait, pos: []string{"r3"}, flags: map[string]string{}},
 		{args: []string{cmdLog, argStep, argE2E, argGrep, "a b", "r2"}, cmd: cmdLog, pos: []string{"r2"}, flags: map[string]string{"step": argE2E, "grep": "a b", "tail": "60", "context": "5"}},
 		{args: []string{argStatus, argJSON}, cmd: argStatus, flags: map[string]string{flagJSON: flagSet}},
@@ -133,8 +137,8 @@ func TestParse(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q: %v", tt.args, err)
 		}
-		if strings.Join(p.args, "|") != strings.Join(tt.pos, "|") || len(p.flags) != len(tt.flags) {
-			t.Fatalf("%q: args %q flags %v", tt.args, p.args, p.flags)
+		if strings.Join(p.args, "|") != strings.Join(tt.pos, "|") || strings.Join(p.passed, "|") != strings.Join(tt.passed, "|") || len(p.flags) != len(tt.flags) {
+			t.Fatalf("%q: args %q passed %q flags %v", tt.args, p.args, p.passed, p.flags)
 		}
 		for k, v := range tt.flags {
 			if p.flags[k] != v {
