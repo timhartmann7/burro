@@ -62,12 +62,8 @@ func (p *Printer) Started(s *Started, took time.Duration) error {
 	if p.json {
 		return p.writeJSON(s)
 	}
-	files := "files"
-	if s.Synced == 1 {
-		files = "file"
-	}
-	text := fmt.Sprintf("%s %s · tree %s · %s\nsynced %d %s in %s\nsteps: %s\n",
-		s.Run, s.Pipeline, s.Tree, StateRunning, s.Synced, files, Duration(took), strings.Join(s.Steps, " "))
+	text := fmt.Sprintf("%s %s · tree %s · %s\nsynced %s in %s\nsteps: %s\n",
+		s.Run, s.Pipeline, s.Tree, StateRunning, files(s.Synced), Duration(took), strings.Join(s.Steps, " "))
 	if len(s.Args) > 0 {
 		text += "args: " + strings.Join(s.Args, " ") + "\n"
 	}
@@ -410,6 +406,42 @@ func (p *Printer) Cleaned(c *Cleaned) error {
 		list = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 	}
 	return p.write(c.Run + " · removed " + list + "\n")
+}
+
+// files is n with the word file, singular for one.
+func files(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
+// Pulled is what pull copied from the server: Files, paths relative to
+// the project folder, now inside the local Folder.
+type Pulled struct {
+	Folder string   `json:"folder"`
+	Files  []string `json:"files"`
+	Bytes  int64    `json:"bytes"`
+}
+
+// pulledShown is how many file lines pull prints before the rest line.
+const pulledShown = 20
+
+// Pulled prints the count, the size and the folder, then the local path of
+// the first files, ready to open.
+func (p *Printer) Pulled(r *Pulled) error {
+	if p.json {
+		return p.writeJSON(r)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "pulled %s, %.1f MB, into %s\n", files(len(r.Files)), float64(r.Bytes)/1e6, r.Folder)
+	for _, f := range r.Files[:min(len(r.Files), pulledShown)] {
+		b.WriteString(r.Folder + "/" + f + "\n")
+	}
+	if hidden := len(r.Files) - pulledShown; hidden > 0 {
+		fmt.Fprintf(&b, "+%d more in %s\n", hidden, r.Folder)
+	}
+	return p.write(b.String())
 }
 
 // What init did to a file.

@@ -49,6 +49,7 @@ type Reply struct {
 	Log      *output.Log      `json:"log,omitempty"`
 	Progress *output.Progress `json:"progress,omitempty"`
 	Cleaned  *output.Cleaned  `json:"cleaned,omitempty"`
+	Pulled   *output.Pulled   `json:"pulled,omitempty"`
 	// Tree is the full tree hash of the run; the summary shows it short.
 	Tree string `json:"tree,omitempty"`
 }
@@ -123,6 +124,8 @@ func (e *Executor) dispatch(action string, args []string) (*Reply, error) {
 		reply.Cleaned, err = e.cleanRun(args)
 	case "log":
 		reply.Log, err = e.log(args)
+	case "files":
+		reply.Pulled, err = e.files(args)
 	case "cancel":
 		reply.Summary, err = e.cancel(args)
 	default:

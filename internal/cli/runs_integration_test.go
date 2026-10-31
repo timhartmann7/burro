@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -708,6 +710,67 @@ func TestReadsSurviveDroppedSSH(t *testing.T) {
 		if r.Code != tt.code || r.Stderr != "" || !strings.Contains(r.Stdout, "cohorts are listed") && tt.args[0] != argStatus {
 			t.Fatalf("%q after a dropped connection: exit %d\nstdout %q\nstderr %q", tt.args, r.Code, r.Stdout, r.Stderr)
 		}
+	}
+}
+
+// samePulled checks that each file, a path in the project, arrived in
+// local byte for byte.
+func (w *world) samePulled(local string, files ...string) {
+	w.t.Helper()
+	for _, name := range files {
+		data, err := os.ReadFile(filepath.Join(local, filepath.FromSlash(name)))
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		sum := sha256.Sum256(data)
+		if want := strings.Fields(w.srv.Exec(w.t, "sha256sum", appDir+"/"+name))[0]; hex.EncodeToString(sum[:]) != want {
+			w.t.Fatalf("%s arrived changed", name)
+		}
+	}
+}
+
+func TestPull(t *testing.T) {
+	w := ready(t, `
+[pipelines]
+default = ["e2e"]
+
+[steps.e2e]
+run = "mkdir -p test-results/login && head -c 70000 /dev/urandom >test-results/login/trace.zip && printf '\\211PNG\\r\\n' >test-results/login/failed-1.png && ln -s /etc/passwd test-results/login/leak; exit 1"
+`, map[string]string{gitignore: "test-results/\n.burro/\n"})
+	w.must(v1, argRun)
+	if r := w.burro(v1, argWait); r.Code != 1 {
+		t.Fatalf("wait: exit %d %q %q", r.Code, r.Stdout, r.Stderr)
+	}
+	local := filepath.Join(w.repo, ".burro", "pull")
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "old.txt"), []byte("from an older pull"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := w.burro(v1, "pull", "test-results")
+	if r.Code != 0 || r.Stderr != "" || r.Stdout != "pulled 2 files, 0.1 MB, into .burro/pull\n"+
+		".burro/pull/test-results/login/failed-1.png\n.burro/pull/test-results/login/trace.zip\n" {
+		t.Fatalf("pull: exit %d\nstdout %q\nstderr %q", r.Code, r.Stdout, r.Stderr)
+	}
+	w.samePulled(local, "test-results/login/trace.zip", "test-results/login/failed-1.png")
+	if _, err := os.Lstat(filepath.Join(local, "test-results", "login", "leak")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a link came along: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(local, "old.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an older pull stayed: %v", err)
+	}
+	// What a pull brings stays out of the tree hash and the next sync, even
+	// in a project whose .gitignore lacks .burro/.
+	if err := os.WriteFile(filepath.Join(w.repo, gitignore), []byte("test-results/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.must(v1, "pull", "test-results/*/*.png")
+	if st := testutil.Git(t, w.repo, "status", "--porcelain", "--untracked-files=all"); strings.Contains(st, ".burro/") {
+		t.Fatalf("git sees the pull:\n%s", st)
+	}
+	if r := w.burro(v1, "pull", "nope"); r.Code != 4 || !strings.Contains(r.Stderr, `matches "nope"`) {
+		t.Fatalf("no match: exit %d %q", r.Code, r.Stderr)
 	}
 }
 

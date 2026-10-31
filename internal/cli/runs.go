@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -495,4 +496,48 @@ func positive(p *parsed, cmd, flag string) (int, error) {
 			fmt.Sprintf("pass a number of lines, for example --%s 100", flag))
 	}
 	return n, nil
+}
+
+// pullFolder is where pull puts what it copies, inside the repository.
+const pullFolder = ".burro/pull"
+
+// pull copies the files of the project folder on the server that the
+// patterns match into .burro/pull, which it empties first, so the folder
+// holds exactly what this pull brought.
+func (a *App) pull(ctx context.Context, p *parsed) error {
+	proj, err := a.project(ctx)
+	if err != nil {
+		return err
+	}
+	if err := proj.store.CheckRsync(ctx); err != nil {
+		return err
+	}
+	// -- keeps a pattern that starts with a dash from reading as a flag.
+	reply, err := a.read(ctx, proj.host, proj.call("files", append([]string{"--"}, p.args...)...)...)
+	if err != nil {
+		return err
+	}
+	pulled := reply.Pulled
+	if pulled == nil {
+		return noResult(proj.host, "pull")
+	}
+	local := filepath.Join(proj.repo.Root(), filepath.FromSlash(pullFolder))
+	if err := os.RemoveAll(local); err != nil {
+		return fmt.Errorf("empty %s: %w", pullFolder, err)
+	}
+	if err := os.MkdirAll(local, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", pullFolder, err)
+	}
+	// Git leaves the folder out even where .gitignore lacks .burro/, so the
+	// tree hash and the next sync never see these files.
+	if err := os.WriteFile(filepath.Join(local, ".gitignore"), []byte("*\n"), 0o600); err != nil {
+		return fmt.Errorf("create %s: %w", pullFolder, err)
+	}
+	longCtx, cancel := context.WithTimeout(ctx, longTimeout)
+	defer cancel()
+	if err := proj.host.Pull(longCtx, proj.cfg.Dir(), pulled.Files, local); err != nil {
+		return err
+	}
+	pulled.Folder = pullFolder
+	return p.print.Pulled(pulled)
 }

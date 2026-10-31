@@ -289,6 +289,28 @@ func (h *Host) Sync(ctx context.Context, t *Tree, dir string) (int, error) {
 	return counter.n, nil
 }
 
+// Pull copies files, paths relative to dir on the host, into the local
+// folder to. The names travel NUL-separated on stdin, so any file name
+// arrives as itself, and rsync sends nothing but them.
+func (h *Host) Pull(ctx context.Context, dir string, files []string, to string) error {
+	if err := h.store.prepare(); err != nil {
+		return err
+	}
+	args := []string{
+		"-a", "--from0", "--files-from=-",
+		"-e", commandLine(append([]string{sshTool}, h.store.sshOptions()...)),
+		h.name + ":" + dir + "/", to + "/",
+	}
+	stderr := &capped{max: maxStderr}
+	cmd := h.store.command(ctx, "rsync", args)
+	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00"))
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pull: %w", h.failure(ctx, "rsync", err, stderr.String()))
+	}
+	return nil
+}
+
 // rsyncPattern matches path, relative to the transfer root, and nothing
 // else, followed by suffix. rsync reads backslashes as escapes only in a
 // pattern with wildcards, and a newline or carriage return would end the

@@ -253,6 +253,7 @@ func commandTable() []string {
 		"burro wait [id] [--timeout d]",
 		"burro status [id]",
 		"burro log [id] --step s [--grep re] [--tail 60] [--context 5]",
+		"burro pull <pattern>…",
 		"burro cancel [id]",
 		"burro failures [id] [--max-lines 40]",
 		"burro clean [id]",
@@ -294,7 +295,7 @@ func TestRegistryMatchesCommandTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var docRows []string
-	for _, m := range regexp.MustCompile("(?m)^\\| `(burro .*?)` \\| .* \\| S\\d \\|$").FindAllStringSubmatch(string(doc), -1) {
+	for _, m := range regexp.MustCompile("(?m)^\\| `(burro .*?)` \\| .* \\| (?:S\\d|post-MVP) \\|$").FindAllStringSubmatch(string(doc), -1) {
 		docRows = append(docRows, m[1])
 	}
 	if strings.Join(docRows, "\n") != strings.Join(want, "\n") {

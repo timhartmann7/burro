@@ -141,11 +141,7 @@ func (p *Printer) Sync(s Sync) error {
 			Seconds float64 `json:"seconds"`
 		}{s.Tree, s.Changed, s.Took.Round(100 * time.Millisecond).Seconds()})
 	}
-	files := "files"
-	if s.Changed == 1 {
-		files = "file"
-	}
-	return p.write(fmt.Sprintf("tree %s · %d %s changed · %s\n", s.Tree, s.Changed, files, Duration(s.Took)))
+	return p.write(fmt.Sprintf("tree %s · %s changed · %s\n", s.Tree, files(s.Changed), Duration(s.Took)))
 }
 
 // Duration formats d the way every summary line does: 0.4s, 12s, 3m10s, 22m,

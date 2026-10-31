@@ -12,6 +12,7 @@ Run tests
   status                        how the run is going
   failures                      what failed and where
   log --step <name>             clean log of one step, --grep to search it
+  pull <pattern>                copy screenshots, traces and reports here
   cancel                        stop the run
 
 Server

@@ -52,6 +52,16 @@ func runResults() map[string]func(p *output.Printer) error {
 				},
 			}, 0)
 		},
+		"pulled": func(p *output.Printer) error {
+			files := []string{"test-results/login-chromium/trace.zip", "test-results/login-chromium/test-failed-1.png"}
+			for i := range 23 {
+				files = append(files, fmt.Sprintf("test-results/cart-%02d/test-failed-1.png", i))
+			}
+			return p.Pulled(&output.Pulled{Folder: ".burro/pull", Files: files, Bytes: 3_412_000})
+		},
+		"pulled-one": func(p *output.Printer) error {
+			return p.Pulled(&output.Pulled{Folder: ".burro/pull", Files: []string{"coverage/lcov.info"}, Bytes: 52_000})
+		},
 		"summary-failed": func(p *output.Printer) error {
 			return p.Summary(&output.Summary{
 				Run: run42, Pipeline: pipelineVerify, Tree: shortTree, State: output.StateDone, Exit: exit(1), Seconds: 41 * 60,

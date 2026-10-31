@@ -48,8 +48,8 @@ const (
 // acceptance: S1-19 S2-18 S3-16
 func TestCommandHelp(t *testing.T) {
 	app := New(nil, &strings.Builder{}, io.Discard, nil, "")
-	if len(app.commands) != 13 {
-		t.Fatalf("%d commands, want the five of S1, the five of S2 and the three of S3", len(app.commands))
+	if len(app.commands) != 14 {
+		t.Fatalf("%d commands, want the five of S1, the five of S2, the three of S3 and pull", len(app.commands))
 	}
 	for i := range app.commands {
 		c := &app.commands[i]

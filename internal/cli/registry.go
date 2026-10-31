@@ -344,6 +344,23 @@ func (a *App) registry() []command {
 			run: a.log,
 		},
 		{
+			name:    "pull",
+			brief:   "pull <pattern>",
+			summary: "copy screenshots, traces and reports here",
+			group:   groupRun,
+			about:   "copy files of the project folder on the server into .burro/pull",
+			usage:   []string{"pull <pattern>…"},
+			minArgs: 1,
+			maxArgs: -1,
+			example: "burro pull 'test-results/*/*.png' test-results/login-chromium",
+			exits: []exitLabel{
+				{output.ExitPassed, "copied"},
+				{output.ExitServer, serverProblem},
+				{output.ExitUsage, "no match, or over 5000 files or 256 MiB"},
+			},
+			run: a.pull,
+		},
+		{
 			name:    "cancel",
 			summary: "stop the run",
 			group:   groupRun,

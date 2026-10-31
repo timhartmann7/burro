@@ -1,0 +1,9 @@
+burro pull · copy files of the project folder on the server into .burro/pull
+
+Usage: burro pull <pattern>…
+
+Example
+  burro pull 'test-results/*/*.png' test-results/login-chromium
+
+Exit codes  0 copied · 2 server problem
+            4 no match, or over 5000 files or 256 MiB

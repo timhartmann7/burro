@@ -74,10 +74,10 @@ func (s *server) call(args ...string) []agent.Reply {
 }
 
 // ok runs a call that must print one reply without an error.
-func (s *server) ok(args ...string) agent.Reply {
+func (s *server) ok(args ...string) *agent.Reply {
 	s.t.Helper()
 	replies := s.call(args...)
-	last := replies[len(replies)-1]
+	last := &replies[len(replies)-1]
 	if last.Error != nil {
 		s.t.Fatalf("%q: %+v", args, last.Error)
 	}
