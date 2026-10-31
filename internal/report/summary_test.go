@@ -197,10 +197,16 @@ func TestSummaryPartialRunIsNoBaseline(t *testing.T) {
 	dir := t.TempDir()
 	p := report.Open(dir)
 	reportRun(t, p, dir, verify, map[string][]string{stepUnit: {jestXML}})
-	// A run of a few tests passes them on: it says nothing of the others.
+	// A run of a few tests passes them on and a canceled run stops before
+	// them: neither says anything of the others.
 	partial := reportRun(t, p, dir, verify, map[string][]string{stepUnit: {pytestXML}})
 	partial.Args = []string{"tests/test_calc.py"}
 	if err := p.WriteStatus(partial); err != nil {
+		t.Fatal(err)
+	}
+	canceled := reportRun(t, p, dir, verify, map[string][]string{stepUnit: {}})
+	canceled.State, canceled.Reason = output.StateCanceled, output.StateCanceled
+	if err := p.WriteStatus(canceled); err != nil {
 		t.Fatal(err)
 	}
 	sum := details(t, p, reportRun(t, p, dir, verify, map[string][]string{stepUnit: {jestXML}}))

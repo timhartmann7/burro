@@ -137,8 +137,9 @@ func more(run string, f *output.Failure) string {
 }
 
 // previous returns the failure keys of the last finished run before s of
-// the same pipeline. A run with step arguments ran only some tests, so a
-// failure it lacks may still be an old one; it is no baseline.
+// the same pipeline. A run with step arguments ran only some tests, and a
+// canceled one stopped part way, so a failure they lack may still be an old
+// one; neither is a baseline.
 func (p *Project) previous(s *Status) map[string]bool {
 	keys := map[string]bool{}
 	m := runName.FindStringSubmatch(s.Run)
@@ -148,7 +149,7 @@ func (p *Project) previous(s *Status) map[string]bool {
 	n, _ := strconv.Atoi(m[1])
 	for n--; n > 0; n-- {
 		prev, err := p.Status("r" + strconv.Itoa(n))
-		if err != nil || prev.Pipeline != s.Pipeline || prev.State == output.StateRunning || len(prev.Args) > 0 {
+		if err != nil || prev.Pipeline != s.Pipeline || prev.State != output.StateDone || len(prev.Args) > 0 {
 			continue
 		}
 		for _, st := range prev.Steps {
