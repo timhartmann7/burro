@@ -107,6 +107,9 @@ func TestReadmeInventsNothing(t *testing.T) {
 			t.Errorf("README has %q", banned)
 		}
 	}
+	// The numbers measured on one real run, described in the comment
+	// under the comparison in README.md. A claim may cite these and no other.
+	measured := strings.NewReplacer("5,154,205", "", "943", "", "5,466", "", "$20.62", "", "$20.61", "", "$0.0038", "")
 	for name, page := range readmePages(t, text) {
 		for _, placeholder := range []*regexp.Regexp{
 			regexp.MustCompile(`(?i)\b(todo|tbd|placeholder|lorem|coming soon|xx+)\b`),
@@ -120,7 +123,7 @@ func TestReadmeInventsNothing(t *testing.T) {
 		}
 		// A claim about saved tokens, calls or speed needs a measurement.
 		claim := regexp.MustCompile(`(?i)\d[\d.,]*\s*(%|x\b|×|times|tokens|calls per|characters|faster|less output)`)
-		if m := claim.FindString(page); m != "" {
+		if m := claim.FindString(measured.Replace(page)); m != "" {
 			t.Errorf("%s states a number no run measured: %q", name, m)
 		}
 	}
