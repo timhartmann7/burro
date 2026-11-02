@@ -24,16 +24,18 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare-dark.svg">
-  <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command." src=".github/readme/compare-light.svg" width="100%">
+  <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command. Below, measured on one real run of a 44-minute test step: its full 9.9 MB log is 5,154,205 tokens, $20.62 to read on Claude Opus 5.5; burro's 24-line summary of it is 943 tokens, $0.0038. 5,466× fewer tokens, $20.61 saved on every read." src=".github/readme/compare-light.svg" width="100%">
 </picture>
 
 <!--
-  The measured number goes here: tokens the agent read on one real run of
-  the same suite, once over plain ssh and once through burro, and the cost
-  at the Claude Opus 5.5 API input price.
+  The numbers in the image come from one real run: a 44-minute test step of
+  a SvelteKit project with 2,071 tests, 7 of them failing. Its full log and
+  the summary `burro wait` printed for it were counted with
+  /v1/messages/count_tokens for claude-opus-5-5 on 2026-11-02.
+  Cost = tokens x $4 / 1,000,000, the Claude Opus 5.5 API input price.
 -->
 
-Over plain ssh the agent pulls the log into its context: ANSI codes, progress bars, and the failing test somewhere in the middle. The log stays in the context and goes out again with every later turn. burro reads the log on the server and sends back what failed, where, and the command to see more.
+Over plain ssh the agent pulls the log into its context: ANSI codes, progress bars, and the failing test somewhere in the middle. The log stays in the context and goes out again with every later turn. A 44-minute run can leave a log of more than 5 million tokens, five times the context window of Claude Opus 5.5, so the agent never sees it whole and digs through it with `grep`. burro reads the log on the server and sends back what failed, where, and the command to see more.
 
 ## Install
 
