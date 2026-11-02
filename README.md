@@ -27,6 +27,8 @@
   <img alt="Plain ssh: 8 MB of log with ANSI codes and noise. Through burro: an 11-line summary with the failed test, its file and line, and the next command. Below, measured on one real run of a 44-minute test step: its full 9.9 MB log is 5,154,205 tokens, $20.62 to read on Claude Opus 5.5; burro's 24-line summary of it is 943 tokens, $0.0038. 5,466× fewer tokens, $20.61 saved on every read." src=".github/readme/compare-light.svg" width="100%">
 </picture>
 
+<p align="center"><sub>Measured on one real run of a 44-minute test step: the full 9.9 MB log is 5,154,205 tokens, $20.62 to read on Claude Opus 5.5. burro's 24-line summary of the same run is 943 tokens, $0.0038. That is 5,466× fewer tokens.</sub></p>
+
 <!--
   The numbers in the image come from one real run: a 44-minute test step of
   a SvelteKit project with 2,071 tests, 7 of them failing. Its full log and
